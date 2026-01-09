@@ -157,7 +157,9 @@ def lookup_pt_to_em(word: str, missing_log: Optional[List[str]] = None) -> Dict:
         for v in _LEXICON_PT[norm]:
             if v not in em_candidates:
                 em_candidates.append(v)
-
+    # Garante no máximo 4 traduções por palavra
+    if len(em_candidates) > 4:
+        em_candidates = em_candidates[:4]
     found = bool(em_candidates)
     if not found and missing_log is not None:
         missing_log.append(word)
@@ -183,7 +185,9 @@ def lookup_em_to_pt(word: str, missing_log: Optional[List[str]] = None) -> Dict:
         for v in _LEXICON_EM[key]:
             if v not in pt_candidates:
                 pt_candidates.append(v)
-
+    # Garante no máximo 4 traduções por palavra
+    if len(pt_candidates) > 4:
+        pt_candidates = pt_candidates[:4]
     found = bool(pt_candidates)
     if not found and missing_log is not None:
         missing_log.append(word)
@@ -208,7 +212,24 @@ def _tokenize(text: str) -> List[str]:
 def _build_sentence_from_lookup(tokens: List[str], direction: str) -> str:
     missing: List[str] = []
     out_tokens: List[str] = []
+    # Caso especial: entrada de única palavra (sem pontuação)
+    # Retorna até 4 traduções possíveis da palavra.
+    if len(tokens) == 1 and not _is_punctuation(tokens[0]):
+        tok = tokens[0]
+        if direction == "pt_to_em":
+            info = lookup_pt_to_em(tok, missing)
+        else:  # em_to_pt
+            info = lookup_em_to_pt(tok, missing)
 
+        candidates = info["candidates"][:4]
+        if candidates:
+            sentence = " / ".join(candidates)
+            if sentence:
+                sentence = sentence[0].upper() + sentence[1:]
+            return sentence
+
+        # Sem candidatos conhecidos, devolve a própria palavra
+        return tok
     for tok in tokens:
         if _is_punctuation(tok):
             out_tokens.append(tok)
