@@ -139,7 +139,7 @@ def correct_spelling_pt(word: str) -> str:
         return word.lower()
     max_allowed = 2 if len(norm) <= 5 else 3
     if best_dist <= max_allowed:
-        return _SPELL_VOCAB[best_key]
+        return _SPELL_VOCAB_PT[best_key]
     return word.lower()
 
 
