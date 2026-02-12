@@ -3,7 +3,11 @@ import re
 import unicodedata
 from typing import Dict, List, Optional, Tuple
 
-from supabase_client_strict import EmakuaResources, load_resources
+from supabase_client_strict import (
+    EmakuaResources,
+    get_phrase_memory_preferences,
+    load_resources,
+)
 
 
 def _normalize_pt(text: str) -> str:
@@ -235,6 +239,18 @@ def _tokenize(text: str) -> List[str]:
     return [t for t in text.split() if t]
 
 
+def _canonicalize_phrase_pt(text: str) -> str:
+    tokens = _tokenize(text)
+    out: List[str] = []
+    for tok in tokens:
+        if _is_punctuation(tok):
+            out.append(tok)
+        else:
+            out.append(_normalize_pt(tok))
+    phrase = " ".join(out)
+    return re.sub(r"\s+([.,!?;:])", r"\1", phrase)
+
+
 def _build_sentence_from_lookup(
     tokens: List[str],
     direction: str,
@@ -243,6 +259,7 @@ def _build_sentence_from_lookup(
     spell_vocab_pt: Dict[str, str],
     lexicon_em: Dict[str, List[str]],
     pronoun_em: Dict[str, List[str]],
+    phrase_pt_preferences: Optional[Dict[int, str]] = None,
 ) -> str:
     missing: List[str] = []
     out_tokens: List[str] = []
@@ -264,11 +281,13 @@ def _build_sentence_from_lookup(
 
         # Sem candidatos conhecidos, devolve a própria palavra
         return tok
+    word_position = 0
     for tok in tokens:
         if _is_punctuation(tok):
             out_tokens.append(tok)
             continue
 
+        word_position += 1
         if direction == "pt_to_em":
             info = lookup_pt_to_em(tok, lexicon_pt, pronoun_pt, spell_vocab_pt, missing)
         else:  # em_to_pt
@@ -276,7 +295,18 @@ def _build_sentence_from_lookup(
 
         candidates = info["candidates"]
         if candidates:
-            out_tokens.append(candidates[0])
+            if direction == "pt_to_em" and phrase_pt_preferences:
+                preferred = phrase_pt_preferences.get(word_position)
+                if preferred:
+                    selected = next(
+                        (c for c in candidates if c.lower() == preferred.lower()),
+                        None,
+                    )
+                    out_tokens.append(selected or candidates[0])
+                else:
+                    out_tokens.append(candidates[0])
+            else:
+                out_tokens.append(candidates[0])
         else:
             out_tokens.append(tok)
 
@@ -340,6 +370,19 @@ def translate_pt_to_em(text: str) -> str:
     lexicon_pt, pronoun_pt, spell_vocab_pt, lexicon_em, pronoun_em = _build_indexes(resources)
 
     tokens = _tokenize(text)
+    phrase_preferences: Dict[int, str] = {}
+    if len([t for t in tokens if not _is_punctuation(t)]) > 1:
+        canonical = _canonicalize_phrase_pt(text)
+        rows = get_phrase_memory_preferences(canonical)
+        for row in rows:
+            try:
+                pos = int(row.get("position_index") or 0)
+            except Exception:
+                pos = 0
+            selected = str(row.get("selected_macua") or "").strip()
+            if pos > 0 and selected:
+                phrase_preferences[pos] = selected
+
     return _build_sentence_from_lookup(
         tokens,
         "pt_to_em",
@@ -348,6 +391,7 @@ def translate_pt_to_em(text: str) -> str:
         spell_vocab_pt,
         lexicon_em,
         pronoun_em,
+        phrase_pt_preferences=phrase_preferences,
     )
 
 
@@ -392,6 +436,18 @@ def translate(text: str, direction: str = "auto") -> str:
     tokens = _tokenize(text)
 
     if direction == "pt_to_em":
+        phrase_preferences: Dict[int, str] = {}
+        if len([t for t in tokens if not _is_punctuation(t)]) > 1:
+            canonical = _canonicalize_phrase_pt(text)
+            rows = get_phrase_memory_preferences(canonical)
+            for row in rows:
+                try:
+                    pos = int(row.get("position_index") or 0)
+                except Exception:
+                    pos = 0
+                selected = str(row.get("selected_macua") or "").strip()
+                if pos > 0 and selected:
+                    phrase_preferences[pos] = selected
         return _build_sentence_from_lookup(
             tokens,
             "pt_to_em",
@@ -400,6 +456,7 @@ def translate(text: str, direction: str = "auto") -> str:
             spell_vocab_pt,
             lexicon_em,
             pronoun_em,
+            phrase_pt_preferences=phrase_preferences,
         )
     if direction == "em_to_pt":
         return _build_sentence_from_lookup(

@@ -1,22 +1,37 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 from supabase_client_strict import VARIANTS_TABLE_NAME, get_client
 from translation_pipeline import (
     _build_indexes,
+    _is_punctuation,
     _levenshtein,
     _normalize_pt,
+    _tokenize,
     load_resources,
     lookup_pt_to_em,
 )
 
 LEXICON_RESOURCE_TABLE = "emakua_ml_resources"
 LEXICON_RESOURCE_NAME = "pt_emakua_lexicon.json"
+PHRASE_MEMORY_TABLE = "emakua_phrase_memory"
 
 
 def _normalize_macua(text: str) -> str:
     return (text or "").strip().lower()
+
+
+def _canonicalize_phrase_pt(text: str) -> str:
+    tokens = _tokenize(text or "")
+    out: List[str] = []
+    for tok in tokens:
+        if _is_punctuation(tok):
+            out.append(tok)
+        else:
+            out.append(_normalize_pt(tok))
+    raw = " ".join(out)
+    return raw.replace(" ,", ",").replace(" .", ".").replace(" !", "!").replace(" ?", "?").replace(" ;", ";").replace(" :", ":")
 
 
 def _dedupe_pairs(items: List[Dict[str, str]]) -> List[Dict[str, str]]:
@@ -93,7 +108,6 @@ def _sync_metadata_entry(pt: str, macuas: List[str]) -> None:
     norm_pt = _normalize_pt(pt)
     matching_keys = _metadata_keys_by_norm_pt(metadata, norm_pt)
 
-    # Keep one canonical key (the one user sent), drop normalized duplicates.
     for key in matching_keys:
         if key != pt:
             metadata.pop(key, None)
@@ -163,9 +177,24 @@ def _fetch_rows_by_norm_pt(norm_pt: str) -> List[Dict[str, Any]]:
     return getattr(resp, "data", None) or []
 
 
+def _fetch_phrase_memory_rows(normalized_phrase: str) -> List[Dict[str, Any]]:
+    client = get_client()
+    try:
+        resp = (
+            client
+            .table(PHRASE_MEMORY_TABLE)
+            .select("position_index,selected_macua")
+            .eq("normalized_source_phrase", normalized_phrase)
+            .order("position_index")
+            .execute()
+        )
+        return getattr(resp, "data", None) or []
+    except Exception:
+        return []
+
+
 def _fetch_rows_by_fuzzy_norm_pt(norm_pt: str, max_distance: int = 2) -> List[Dict[str, Any]]:
     client = get_client()
-    # Pull a bounded set and filter in Python to keep compatibility simple.
     resp = (
         client
         .table(VARIANTS_TABLE_NAME)
@@ -197,44 +226,242 @@ def _pt_norm_distance_limit(norm_pt: str) -> int:
     return 3
 
 
+def _collect_candidates_for_token(
+    token_pt: str,
+    lexicon_pt: Dict[str, List[str]],
+    pronoun_pt: Dict[str, List[str]],
+    spell_vocab_pt: Dict[str, str],
+    fuzzy: bool = False,
+) -> List[str]:
+    info = lookup_pt_to_em(token_pt, lexicon_pt, pronoun_pt, spell_vocab_pt)
+    norm_pt = str(info.get("normalized") or _normalize_pt(token_pt))
+
+    candidates: List[str] = []
+    for c in info.get("candidates", []) or []:
+        s = str(c).strip()
+        if s and s.lower() not in {v.lower() for v in candidates}:
+            candidates.append(s)
+
+    dist_limit = _pt_norm_distance_limit(norm_pt)
+    for pt_norm, macuas in lexicon_pt.items():
+        is_match = pt_norm == norm_pt
+        if fuzzy and not is_match:
+            if abs(len(pt_norm) - len(norm_pt)) <= dist_limit and _levenshtein(pt_norm, norm_pt) <= dist_limit:
+                is_match = True
+        if not is_match:
+            continue
+        for macua in macuas:
+            s = str(macua).strip()
+            if s and s.lower() not in {v.lower() for v in candidates}:
+                candidates.append(s)
+
+    rows = _fetch_rows_by_norm_pt(norm_pt)
+    if fuzzy and not rows:
+        rows = _fetch_rows_by_fuzzy_norm_pt(norm_pt, max_distance=dist_limit)
+    for row in rows:
+        s = str((row or {}).get("macua") or "").strip()
+        if s and s.lower() not in {v.lower() for v in candidates}:
+            candidates.append(s)
+
+    return candidates
+
+
 def _collect_variants_for_word(word: str) -> Tuple[Dict[str, str], List[Dict[str, str]]]:
     resources = load_resources()
     lexicon_pt, pronoun_pt, spell_vocab_pt, _, _ = _build_indexes(resources)
 
-    lookup = lookup_pt_to_em(word, lexicon_pt, pronoun_pt, spell_vocab_pt)
-    resolved_pt = lookup.get("normalized") or _normalize_pt(word)
-    principal_pt_raw = (word or "").strip()
-    if not principal_pt_raw:
-        principal_pt_raw = word
-
-    pairs: List[Dict[str, str]] = []
-    for candidate in lookup.get("candidates", []) or []:
-        pairs.append({"pt": principal_pt_raw, "macua": str(candidate)})
-
-    dist_limit = _pt_norm_distance_limit(resolved_pt)
-    # Include close PT keys from lexicon metadata.
-    for pt_norm, macuas in lexicon_pt.items():
-        if abs(len(pt_norm) - len(resolved_pt)) > dist_limit:
-            continue
-        if _levenshtein(pt_norm, resolved_pt) > dist_limit:
-            continue
-        for macua in macuas:
-            pairs.append({"pt": pt_norm, "macua": str(macua)})
-
-    # Include variants saved as independent DB rows.
-    db_rows = _fetch_rows_by_norm_pt(resolved_pt)
-    if not db_rows:
-        db_rows = _fetch_rows_by_fuzzy_norm_pt(resolved_pt, max_distance=dist_limit)
-    for row in db_rows:
-        pt = str((row or {}).get("pt") or "").strip()
-        macua = str((row or {}).get("macua") or "").strip()
-        if not pt or not macua:
-            continue
-        pairs.append({"pt": pt, "macua": macua})
+    candidates = _collect_candidates_for_token(word, lexicon_pt, pronoun_pt, spell_vocab_pt, fuzzy=True)
+    pairs = [{"pt": word.strip(), "macua": c} for c in candidates]
 
     deduped = _dedupe_pairs(pairs)
-    principal = deduped[0] if deduped else {"pt": principal_pt_raw, "macua": ""}
+    principal = deduped[0] if deduped else {"pt": word.strip(), "macua": ""}
     return principal, deduped
+
+
+def _join_phrase_tokens(parts: List[str]) -> str:
+    raw = " ".join(parts)
+    raw = raw.replace(" ,", ",").replace(" .", ".").replace(" !", "!")
+    raw = raw.replace(" ?", "?").replace(" ;", ";").replace(" :", ":")
+    return raw.strip()
+
+
+def get_phrase_correction_payload(texto: str) -> Dict[str, Any]:
+    phrase = (texto or "").strip()
+    resources = load_resources()
+    lexicon_pt, pronoun_pt, spell_vocab_pt, _, _ = _build_indexes(resources)
+
+    tokens = _tokenize(phrase)
+    memory_rows = _fetch_phrase_memory_rows(_canonicalize_phrase_pt(phrase))
+    memory_map = {}
+    for row in memory_rows:
+        try:
+            pos = int(row.get("position_index") or 0)
+        except Exception:
+            pos = 0
+        sel = str(row.get("selected_macua") or "").strip()
+        if pos > 0 and sel:
+            memory_map[pos] = sel
+
+    words_payload: List[Dict[str, Any]] = []
+    composed_parts: List[str] = []
+
+    pos_counter = 0
+    for token in tokens:
+        if _is_punctuation(token):
+            composed_parts.append(token)
+            words_payload.append(
+                {
+                    "posicao": pos_counter,
+                    "pt": token,
+                    "pontuacao": True,
+                    "variantes": [{"macua": token, "selecionada": True}],
+                    "selecionada": token,
+                }
+            )
+            continue
+
+        pos_counter += 1
+        candidates = _collect_candidates_for_token(token, lexicon_pt, pronoun_pt, spell_vocab_pt, fuzzy=False)
+        selected = candidates[0] if candidates else token
+        preferred = memory_map.get(pos_counter)
+        if preferred:
+            preferred_match = next(
+                (c for c in candidates if c.lower() == preferred.lower()),
+                None,
+            )
+            if preferred_match:
+                selected = preferred_match
+        composed_parts.append(selected)
+
+        words_payload.append(
+            {
+                "posicao": pos_counter,
+                "pt": token,
+                "pontuacao": False,
+                "variantes": [
+                    {"macua": c, "selecionada": c == selected}
+                    for c in candidates
+                ]
+                if candidates
+                else [{"macua": token, "selecionada": True}],
+                "selecionada": selected,
+            }
+        )
+
+    frase_montada = _join_phrase_tokens(composed_parts)
+    if frase_montada:
+        frase_montada = frase_montada[0].upper() + frase_montada[1:]
+
+    return {
+        "entrada": phrase,
+        "frase_montada": frase_montada,
+        "palavras": words_payload,
+    }
+
+
+def save_phrase_learning(payload: Dict[str, Any]) -> Dict[str, Any]:
+    client = get_client()
+    frase_original = str(payload.get("frase_original") or "").strip()
+    palavras = payload.get("palavras") or []
+    if not isinstance(palavras, list) or not palavras:
+        raise RuntimeError("Campo 'palavras' invalido")
+
+    canonical_phrase = _canonicalize_phrase_pt(frase_original)
+
+    phrase_rows: List[Dict[str, Any]] = []
+    reconstructed_parts: List[str] = []
+
+    variants_to_upsert: List[Dict[str, str]] = []
+
+    ordered = sorted(
+        [p for p in palavras if isinstance(p, dict)],
+        key=lambda x: int(x.get("posicao") or 0),
+    )
+
+    visible_pos = 0
+    for item in ordered:
+        pt = str(item.get("pt") or "").strip()
+        if not pt:
+            continue
+
+        is_punctuation = bool(item.get("pontuacao")) or _is_punctuation(pt)
+        selected = str(item.get("selecionada") or "").strip()
+        variantes = item.get("variantes") or []
+        if not isinstance(variantes, list):
+            variantes = []
+
+        if is_punctuation:
+            reconstructed_parts.append(pt)
+            continue
+
+        visible_pos += 1
+
+        all_variants: List[str] = []
+        for v in variantes:
+            if isinstance(v, dict):
+                val = str(v.get("macua") or "").strip()
+            else:
+                val = str(v).strip()
+            if val and val.lower() not in {x.lower() for x in all_variants}:
+                all_variants.append(val)
+
+        if selected and selected.lower() not in {x.lower() for x in all_variants}:
+            all_variants.insert(0, selected)
+
+        if not selected:
+            selected = all_variants[0] if all_variants else pt
+        reconstructed_parts.append(selected)
+
+        if all_variants:
+            _sync_metadata_entry(pt, all_variants)
+            for macua in all_variants:
+                variants_to_upsert.append({"pt": pt, "macua": macua})
+
+        phrase_rows.append(
+            {
+                "source_phrase": frase_original,
+                "normalized_source_phrase": canonical_phrase,
+                "token_pt": pt,
+                "normalized_token_pt": _normalize_pt(pt),
+                "selected_macua": selected,
+                "normalized_selected_macua": _normalize_macua(selected),
+                "position_index": visible_pos,
+                "phrase_length": len([p for p in ordered if not bool(p.get("pontuacao")) and not _is_punctuation(str(p.get("pt") or ""))]),
+                "metadata": {
+                    "variantes": all_variants,
+                },
+            }
+        )
+
+    if variants_to_upsert:
+        upsert_variants(variants_to_upsert)
+
+    # Replace memory for this phrase key.
+    (
+        client
+        .table(PHRASE_MEMORY_TABLE)
+        .delete()
+        .eq("normalized_source_phrase", canonical_phrase)
+        .execute()
+    )
+
+    if phrase_rows:
+        (
+            client
+            .table(PHRASE_MEMORY_TABLE)
+            .insert(phrase_rows)
+            .execute()
+        )
+
+    frase_montada = _join_phrase_tokens(reconstructed_parts)
+    if frase_montada:
+        frase_montada = frase_montada[0].upper() + frase_montada[1:]
+
+    return {
+        "saved": len(phrase_rows),
+        "frase_montada": frase_montada,
+        "normalizada": canonical_phrase,
+    }
 
 
 def get_correction_payload(word: str) -> Dict[str, Any]:
@@ -279,7 +506,6 @@ def upsert_variants(variantes: List[Dict[str, str]]) -> Dict[str, Any]:
         .execute()
     )
 
-    # Keep only the submitted set for each normalized PT touched in this save.
     for norm_pt in touched_norm_pts:
         allowed = {
             row["normalized_macua"]
@@ -295,15 +521,10 @@ def upsert_variants(variantes: List[Dict[str, str]]) -> Dict[str, Any]:
         if ids_to_delete:
             client.table(VARIANTS_TABLE_NAME).delete().in_("id", ids_to_delete).execute()
 
-    # Keep metadata in sync so translation output is immediately consistent.
-    # Frontend currently sends one PT per save operation.
     grouped: Dict[str, Dict[str, Any]] = {}
     for row in rows:
         norm_pt = row["normalized_pt"]
-        bucket = grouped.setdefault(
-            norm_pt,
-            {"pt": row["pt"], "macuas": []},
-        )
+        bucket = grouped.setdefault(norm_pt, {"pt": row["pt"], "macuas": []})
         bucket["macuas"].append(row["macua"])
     for payload in grouped.values():
         _sync_metadata_entry(payload["pt"], payload["macuas"])
@@ -347,4 +568,3 @@ def delete_entry(pt: str) -> int:
     data = getattr(resp, "data", None) or []
     _remove_metadata_entry(pt)
     return len(data)
-

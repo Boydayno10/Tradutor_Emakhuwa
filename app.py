@@ -2,7 +2,14 @@ import os
 
 from flask import Flask, jsonify, request
 
-from correction_service import delete_entry, delete_variant, get_correction_payload, upsert_variants
+from correction_service import (
+    delete_entry,
+    delete_variant,
+    get_correction_payload,
+    get_phrase_correction_payload,
+    save_phrase_learning,
+    upsert_variants,
+)
 from supabase_client_strict import get_client
 from translation_pipeline import translate
 
@@ -103,6 +110,18 @@ def correcao_get_route():
         return jsonify({"error": str(exc)}), 500
 
 
+@app.route("/api/correcao/frase", methods=["GET"])
+def correcao_phrase_get_route():
+    texto = (request.args.get("texto") or "").strip()
+    if not texto:
+        return jsonify({"error": "Parametro 'texto' e obrigatorio"}), 400
+    try:
+        payload = get_phrase_correction_payload(texto)
+        return jsonify(payload)
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
 @app.route("/api/correcao/salvar", methods=["POST"])
 def correcao_save_route():
     _, auth_error = _require_authorized_profile()
@@ -119,6 +138,20 @@ def correcao_save_route():
 
     try:
         result = upsert_variants(variantes)
+        return jsonify(result)
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/correcao/frase/salvar", methods=["POST"])
+def correcao_phrase_save_route():
+    _, auth_error = _require_authorized_profile()
+    if auth_error:
+        return auth_error
+
+    data = request.get_json(silent=True) or {}
+    try:
+        result = save_phrase_learning(data)
         return jsonify(result)
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500

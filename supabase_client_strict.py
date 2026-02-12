@@ -15,6 +15,10 @@ VARIANTS_TABLE_NAME = os.environ.get(
     "EMAKUA_VARIANTS_TABLE_NAME",
     "emakua_translation_variants",
 )
+PHRASE_MEMORY_TABLE_NAME = os.environ.get(
+    "EMAKUA_PHRASE_MEMORY_TABLE_NAME",
+    "emakua_phrase_memory",
+)
 
 if not SUPABASE_URL or not SUPABASE_KEY:
     raise RuntimeError("SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY/ANON_KEY precisam estar definidos no ambiente.")
@@ -194,3 +198,32 @@ def load_resources() -> EmakuaResources:
 def get_client() -> Client:
     """Exposes the shared Supabase client for server-side service modules."""
     return _client
+
+
+def get_phrase_memory_preferences(normalized_source_phrase: str) -> List[Dict[str, Any]]:
+    """Returns per-token preferences learned for a specific normalized PT phrase.
+
+    Output rows contain at least:
+      - token_pt
+      - normalized_token_pt
+      - selected_macua
+      - normalized_selected_macua
+      - position_index
+    """
+    phrase = (normalized_source_phrase or "").strip()
+    if not phrase:
+        return []
+    try:
+        resp = (
+            _client
+            .table(PHRASE_MEMORY_TABLE_NAME)
+            .select(
+                "token_pt,normalized_token_pt,selected_macua,normalized_selected_macua,position_index"
+            )
+            .eq("normalized_source_phrase", phrase)
+            .order("position_index")
+            .execute()
+        )
+        return getattr(resp, "data", None) or []
+    except Exception:
+        return []
