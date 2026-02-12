@@ -11,6 +11,9 @@ from translation_pipeline import (
     lookup_pt_to_em,
 )
 
+LEXICON_RESOURCE_TABLE = "emakua_ml_resources"
+LEXICON_RESOURCE_NAME = "pt_emakua_lexicon.json"
+
 
 def _normalize_macua(text: str) -> str:
     return (text or "").strip().lower()
@@ -30,6 +33,122 @@ def _dedupe_pairs(items: List[Dict[str, str]]) -> List[Dict[str, str]]:
         seen.add(key)
         out.append({"pt": pt, "macua": macua})
     return out
+
+
+def _parse_metadata_value(value: Any) -> List[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(v).strip() for v in value if str(v).strip()]
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return []
+        if "," in raw:
+            return [part.strip() for part in raw.split(",") if part.strip()]
+        return [raw]
+    return []
+
+
+def _load_lexicon_resource() -> Tuple[str, Dict[str, Any]]:
+    client = get_client()
+    resp = (
+        client
+        .table(LEXICON_RESOURCE_TABLE)
+        .select("id,metadata")
+        .eq("name", LEXICON_RESOURCE_NAME)
+        .limit(1)
+        .execute()
+    )
+    rows = getattr(resp, "data", None) or []
+    if not rows:
+        raise RuntimeError(f"Recurso {LEXICON_RESOURCE_NAME} nao encontrado em {LEXICON_RESOURCE_TABLE}")
+    row = rows[0]
+    resource_id = str(row.get("id") or "").strip()
+    metadata = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
+    return resource_id, dict(metadata)
+
+
+def _save_lexicon_metadata(resource_id: str, metadata: Dict[str, Any]) -> None:
+    client = get_client()
+    (
+        client
+        .table(LEXICON_RESOURCE_TABLE)
+        .update({"metadata": metadata})
+        .eq("id", resource_id)
+        .execute()
+    )
+
+
+def _metadata_keys_by_norm_pt(metadata: Dict[str, Any], norm_pt: str) -> List[str]:
+    keys: List[str] = []
+    for key in metadata.keys():
+        if _normalize_pt(str(key)) == norm_pt:
+            keys.append(str(key))
+    return keys
+
+
+def _sync_metadata_entry(pt: str, macuas: List[str]) -> None:
+    resource_id, metadata = _load_lexicon_resource()
+    norm_pt = _normalize_pt(pt)
+    matching_keys = _metadata_keys_by_norm_pt(metadata, norm_pt)
+
+    # Keep one canonical key (the one user sent), drop normalized duplicates.
+    for key in matching_keys:
+        if key != pt:
+            metadata.pop(key, None)
+
+    deduped_macuas: List[str] = []
+    seen = set()
+    for item in macuas:
+        value = str(item).strip()
+        if not value:
+            continue
+        k = value.lower()
+        if k in seen:
+            continue
+        seen.add(k)
+        deduped_macuas.append(value)
+
+    if deduped_macuas:
+        metadata[pt] = deduped_macuas
+    else:
+        metadata.pop(pt, None)
+
+    _save_lexicon_metadata(resource_id, metadata)
+
+
+def _remove_metadata_variant(pt: str, macua: str) -> None:
+    resource_id, metadata = _load_lexicon_resource()
+    norm_pt = _normalize_pt(pt)
+    norm_macua = _normalize_macua(macua)
+
+    changed = False
+    for key in list(metadata.keys()):
+        if _normalize_pt(str(key)) != norm_pt:
+            continue
+        current = _parse_metadata_value(metadata.get(key))
+        filtered = [item for item in current if _normalize_macua(item) != norm_macua]
+        if filtered:
+            metadata[key] = filtered
+        else:
+            metadata.pop(key, None)
+        changed = True
+
+    if changed:
+        _save_lexicon_metadata(resource_id, metadata)
+
+
+def _remove_metadata_entry(pt: str) -> None:
+    resource_id, metadata = _load_lexicon_resource()
+    norm_pt = _normalize_pt(pt)
+    changed = False
+    for key in list(metadata.keys()):
+        if _normalize_pt(str(key)) == norm_pt:
+            metadata.pop(key, None)
+            changed = True
+    if changed:
+        _save_lexicon_metadata(resource_id, metadata)
 
 
 def _fetch_rows_by_norm_pt(norm_pt: str) -> List[Dict[str, Any]]:
@@ -176,6 +295,19 @@ def upsert_variants(variantes: List[Dict[str, str]]) -> Dict[str, Any]:
         if ids_to_delete:
             client.table(VARIANTS_TABLE_NAME).delete().in_("id", ids_to_delete).execute()
 
+    # Keep metadata in sync so translation output is immediately consistent.
+    # Frontend currently sends one PT per save operation.
+    grouped: Dict[str, Dict[str, Any]] = {}
+    for row in rows:
+        norm_pt = row["normalized_pt"]
+        bucket = grouped.setdefault(
+            norm_pt,
+            {"pt": row["pt"], "macuas": []},
+        )
+        bucket["macuas"].append(row["macua"])
+    for payload in grouped.values():
+        _sync_metadata_entry(payload["pt"], payload["macuas"])
+
     first_word = normalized[0]["pt"]
     principal, variants = _collect_variants_for_word(first_word)
     return {
@@ -198,6 +330,7 @@ def delete_variant(pt: str, macua: str) -> int:
         .execute()
     )
     data = getattr(resp, "data", None) or []
+    _remove_metadata_variant(pt, macua)
     return len(data)
 
 
@@ -212,5 +345,6 @@ def delete_entry(pt: str) -> int:
         .execute()
     )
     data = getattr(resp, "data", None) or []
+    _remove_metadata_entry(pt)
     return len(data)
 
