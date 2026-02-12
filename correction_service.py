@@ -436,22 +436,31 @@ def save_phrase_learning(payload: Dict[str, Any]) -> Dict[str, Any]:
     if variants_to_upsert:
         upsert_variants(variants_to_upsert)
 
-    # Replace memory for this phrase key.
-    (
-        client
-        .table(PHRASE_MEMORY_TABLE)
-        .delete()
-        .eq("normalized_source_phrase", canonical_phrase)
-        .execute()
-    )
+    phrase_memory_saved = False
+    phrase_memory_error = ""
 
-    if phrase_rows:
+    # Replace memory for this phrase key. If this table is unavailable,
+    # we still keep per-word variants saved to avoid losing learning.
+    try:
         (
             client
             .table(PHRASE_MEMORY_TABLE)
-            .insert(phrase_rows)
+            .delete()
+            .eq("normalized_source_phrase", canonical_phrase)
             .execute()
         )
+
+        if phrase_rows:
+            (
+                client
+                .table(PHRASE_MEMORY_TABLE)
+                .insert(phrase_rows)
+                .execute()
+            )
+        phrase_memory_saved = True
+    except Exception as exc:
+        phrase_memory_saved = False
+        phrase_memory_error = str(exc)
 
     frase_montada = _join_phrase_tokens(reconstructed_parts)
     if frase_montada:
@@ -461,6 +470,8 @@ def save_phrase_learning(payload: Dict[str, Any]) -> Dict[str, Any]:
         "saved": len(phrase_rows),
         "frase_montada": frase_montada,
         "normalizada": canonical_phrase,
+        "phrase_memory_saved": phrase_memory_saved,
+        "phrase_memory_error": phrase_memory_error,
     }
 
 
