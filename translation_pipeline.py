@@ -277,6 +277,26 @@ def _canonicalize_phrase_pt(text: str) -> str:
     return re.sub(r"\s+([.,!?;:])", r"\1", phrase)
 
 
+def _build_sentence_from_memory_words(tokens: List[str], selected_words: List[str]) -> str:
+    """Builds sentence preserving punctuation slots, using learned word order."""
+
+    out_tokens: List[str] = []
+    idx = 0
+    for tok in tokens:
+        if _is_punctuation(tok):
+            out_tokens.append(tok)
+            continue
+        replacement = selected_words[idx] if idx < len(selected_words) else tok
+        out_tokens.append(replacement)
+        idx += 1
+
+    sentence = " ".join(out_tokens)
+    sentence = re.sub(r"\s+([.,!?;:])", r"\1", sentence)
+    if sentence:
+        sentence = sentence[0].upper() + sentence[1:]
+    return sentence
+
+
 def _build_sentence_from_lookup(
     tokens: List[str],
     direction: str,
@@ -404,10 +424,17 @@ def translate_pt_to_em(text: str) -> str:
     lexicon_pt, pronoun_pt, spell_vocab_pt, lexicon_em, pronoun_em = _build_indexes(resources)
 
     tokens = _tokenize(text)
+    word_tokens = [t for t in tokens if not _is_punctuation(t)]
     phrase_preferences: Dict[int, str] = {}
-    if len([t for t in tokens if not _is_punctuation(t)]) > 1:
+    if len(word_tokens) > 1:
         canonical = _canonicalize_phrase_pt(text)
         rows = get_phrase_memory_preferences(canonical)
+        learned_words = [
+            str((row or {}).get("selected_macua") or "").strip()
+            for row in rows
+        ]
+        if len(learned_words) == len(word_tokens) and all(learned_words):
+            return _build_sentence_from_memory_words(tokens, learned_words)
         for row in rows:
             try:
                 pos = int(row.get("position_index") or 0)
@@ -470,10 +497,17 @@ def translate(text: str, direction: str = "auto") -> str:
     tokens = _tokenize(text)
 
     if direction == "pt_to_em":
+        word_tokens = [t for t in tokens if not _is_punctuation(t)]
         phrase_preferences: Dict[int, str] = {}
-        if len([t for t in tokens if not _is_punctuation(t)]) > 1:
+        if len(word_tokens) > 1:
             canonical = _canonicalize_phrase_pt(text)
             rows = get_phrase_memory_preferences(canonical)
+            learned_words = [
+                str((row or {}).get("selected_macua") or "").strip()
+                for row in rows
+            ]
+            if len(learned_words) == len(word_tokens) and all(learned_words):
+                return _build_sentence_from_memory_words(tokens, learned_words)
             for row in rows:
                 try:
                     pos = int(row.get("position_index") or 0)
@@ -505,9 +539,16 @@ def translate(text: str, direction: str = "auto") -> str:
 
     auto_dir = _detect_direction(tokens, lexicon_pt, pronoun_pt, lexicon_em, pronoun_em)
     phrase_preferences: Dict[int, str] = {}
-    if auto_dir == "pt_to_em" and len([t for t in tokens if not _is_punctuation(t)]) > 1:
+    word_tokens = [t for t in tokens if not _is_punctuation(t)]
+    if auto_dir == "pt_to_em" and len(word_tokens) > 1:
         canonical = _canonicalize_phrase_pt(text)
         rows = get_phrase_memory_preferences(canonical)
+        learned_words = [
+            str((row or {}).get("selected_macua") or "").strip()
+            for row in rows
+        ]
+        if len(learned_words) == len(word_tokens) and all(learned_words):
+            return _build_sentence_from_memory_words(tokens, learned_words)
         for row in rows:
             try:
                 pos = int(row.get("position_index") or 0)
