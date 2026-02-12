@@ -197,6 +197,32 @@ def lookup_pt_to_em(
     }
 
 
+def _resolve_preferred_pt_variant(
+    token: str,
+    preferred: str,
+    lexicon_pt: Dict[str, List[str]],
+    pronoun_pt: Dict[str, List[str]],
+    spell_vocab_pt: Dict[str, str],
+) -> Optional[str]:
+    """Finds a preferred PT->Emakhuwa variant even when it is outside top-N candidates."""
+
+    pref = (preferred or "").strip()
+    if not pref:
+        return None
+
+    corrected = correct_spelling_pt(token, spell_vocab_pt)
+    norm = _normalize_pt(corrected)
+    pref_norm = pref.lower()
+
+    for cand in pronoun_pt.get(norm, []):
+        if isinstance(cand, str) and cand.strip().lower() == pref_norm:
+            return cand.strip()
+    for cand in lexicon_pt.get(norm, []):
+        if isinstance(cand, str) and cand.strip().lower() == pref_norm:
+            return cand.strip()
+    return None
+
+
 def lookup_em_to_pt(
     word: str,
     lexicon_em: Dict[str, List[str]],
@@ -302,6 +328,14 @@ def _build_sentence_from_lookup(
                         (c for c in candidates if c.lower() == preferred.lower()),
                         None,
                     )
+                    if not selected:
+                        selected = _resolve_preferred_pt_variant(
+                            tok,
+                            preferred,
+                            lexicon_pt,
+                            pronoun_pt,
+                            spell_vocab_pt,
+                        )
                     out_tokens.append(selected or candidates[0])
                 else:
                     out_tokens.append(candidates[0])
@@ -470,6 +504,19 @@ def translate(text: str, direction: str = "auto") -> str:
         )
 
     auto_dir = _detect_direction(tokens, lexicon_pt, pronoun_pt, lexicon_em, pronoun_em)
+    phrase_preferences: Dict[int, str] = {}
+    if auto_dir == "pt_to_em" and len([t for t in tokens if not _is_punctuation(t)]) > 1:
+        canonical = _canonicalize_phrase_pt(text)
+        rows = get_phrase_memory_preferences(canonical)
+        for row in rows:
+            try:
+                pos = int(row.get("position_index") or 0)
+            except Exception:
+                pos = 0
+            selected = str(row.get("selected_macua") or "").strip()
+            if pos > 0 and selected:
+                phrase_preferences[pos] = selected
+
     return _build_sentence_from_lookup(
         tokens,
         auto_dir,
@@ -478,4 +525,5 @@ def translate(text: str, direction: str = "auto") -> str:
         spell_vocab_pt,
         lexicon_em,
         pronoun_em,
+        phrase_pt_preferences=phrase_preferences,
     )
