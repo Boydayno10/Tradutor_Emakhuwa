@@ -1,7 +1,6 @@
 import os
 from typing import Any, Dict, Optional
 
-from openai import OpenAI
 from training_knowledge_loader import load_training_knowledge
 
 
@@ -48,7 +47,12 @@ Voce e um analisador linguistico auxiliar.
 """.strip()
 
 
-def _get_client() -> OpenAI:
+def _get_client() -> Any:
+    try:
+        from openai import OpenAI
+    except Exception as exc:
+        raise RuntimeError(f"Dependencia 'openai' indisponivel: {exc}") from exc
+
     api_key = (os.environ.get("OPENAI_API_KEY") or "").strip()
     if not api_key:
         raise RuntimeError("OPENAI_API_KEY nao definido")
