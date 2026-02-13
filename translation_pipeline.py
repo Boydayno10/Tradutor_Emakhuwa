@@ -88,6 +88,35 @@ _PT_ADJECTIVE_HINTS = {
     "feias",
 }
 
+_PT_QUESTION_HINTS = {
+    "quem",
+    "que",
+    "qual",
+    "quais",
+    "quando",
+    "onde",
+    "aonde",
+    "como",
+    "quanto",
+    "quantos",
+    "quanta",
+    "quantas",
+    "porque",
+    "por",
+}
+
+_PT_EXCLAMATION_HINTS = {
+    "uau",
+    "nossa",
+    "socorro",
+    "cuidado",
+    "parabens",
+    "incrivel",
+    "fantastico",
+    "otimo",
+    "excelente",
+}
+
 
 def _dedupe_keep_order(items: List[str]) -> List[str]:
     out: List[str] = []
@@ -468,6 +497,52 @@ def _normalize_sentence_case(text: str) -> str:
     return _rebuild_sentence_from_tokens(out)
 
 
+def _has_terminal_punctuation(text: str) -> bool:
+    return bool(re.search(r"[.!?]\s*$", (text or "").strip()))
+
+
+def _infer_terminal_punctuation(source_text: str, word_tokens: List[str]) -> str:
+    normalized = [_normalize_pt(t) for t in word_tokens if t and not _is_punctuation(t)]
+    if not normalized:
+        return "."
+
+    first = normalized[0]
+    if first in _PT_QUESTION_HINTS:
+        return "?"
+    if len(normalized) >= 2 and normalized[0] == "por" and normalized[1] == "que":
+        return "?"
+
+    if first in _PT_EXCLAMATION_HINTS:
+        return "!"
+    if any(tok in _PT_EXCLAMATION_HINTS for tok in normalized):
+        return "!"
+
+    # fallback padrao
+    return "."
+
+
+def _apply_phrase_punctuation_policy(source_text: str, translated: str) -> str:
+    out = (translated or "").strip()
+    if not out:
+        return out
+
+    source_tokens = _tokenize(source_text or "")
+    source_words = [t for t in source_tokens if not _is_punctuation(t)]
+
+    # Regra solicitada: frases compostas (>2 palavras) nao devem conter virgulas.
+    if len(source_words) > 2:
+        out = out.replace(",", "")
+        out = re.sub(r"\s{2,}", " ", out).strip()
+        out = re.sub(r"\s+([.!?;:])", r"\1", out)
+
+    # Se a frase de origem nao termina com pontuacao terminal, inferimos uma.
+    # Em perguntas, adiciona '?' mesmo que o usuario nao tenha colocado.
+    if len(source_words) > 1 and not _has_terminal_punctuation(source_text) and not _has_terminal_punctuation(out):
+        out = f"{out}{_infer_terminal_punctuation(source_text, source_words)}"
+
+    return out
+
+
 def _reorder_quality_pattern_pt(tokens: List[str]) -> List[str]:
     """Regra 6: para padrÃ£o simples [adjetivo substantivo], reordena para substantivo + adjetivo."""
     words = [t for t in tokens if not _is_punctuation(t)]
@@ -715,7 +790,8 @@ def translate_pt_to_em(text: str) -> str:
             for row in rows
         ]
         if len(learned_words) == len(word_tokens) and all(learned_words):
-            return _build_sentence_from_memory_words(tokens, learned_words)
+            sentence = _build_sentence_from_memory_words(tokens, learned_words)
+            return _apply_phrase_punctuation_policy(text, sentence)
         for row in rows:
             try:
                 pos = int(row.get("position_index") or 0)
@@ -725,7 +801,7 @@ def translate_pt_to_em(text: str) -> str:
             if pos > 0 and selected:
                 phrase_preferences[pos] = selected
 
-    return _build_sentence_from_lookup(
+    sentence = _build_sentence_from_lookup(
         tokens,
         "pt_to_em",
         lexicon_pt,
@@ -737,6 +813,7 @@ def translate_pt_to_em(text: str) -> str:
         phrase_pt_preferences=phrase_preferences,
         possessive_suffix_by_position=possessive_suffix_by_position,
     )
+    return _apply_phrase_punctuation_policy(text, sentence)
 
 
 def translate_em_to_pt(text: str) -> str:
@@ -748,7 +825,7 @@ def translate_em_to_pt(text: str) -> str:
     lexicon_pt, pronoun_pt, spell_vocab_pt, lexicon_em, pronoun_em, grammar_profile = _build_indexes(resources)
 
     tokens = _tokenize(text)
-    return _build_sentence_from_lookup(
+    sentence = _build_sentence_from_lookup(
         tokens,
         "em_to_pt",
         lexicon_pt,
@@ -758,6 +835,7 @@ def translate_em_to_pt(text: str) -> str:
         pronoun_em,
         grammar_profile,
     )
+    return _apply_phrase_punctuation_policy(text, sentence)
 
 
 def translate(text: str, direction: str = "auto") -> str:
@@ -793,7 +871,8 @@ def translate(text: str, direction: str = "auto") -> str:
                 for row in rows
             ]
             if len(learned_words) == len(word_tokens) and all(learned_words):
-                return _build_sentence_from_memory_words(tokens, learned_words)
+                sentence = _build_sentence_from_memory_words(tokens, learned_words)
+                return _apply_phrase_punctuation_policy(text, sentence)
             for row in rows:
                 try:
                     pos = int(row.get("position_index") or 0)
@@ -802,7 +881,7 @@ def translate(text: str, direction: str = "auto") -> str:
                 selected = str(row.get("selected_macua") or "").strip()
                 if pos > 0 and selected:
                     phrase_preferences[pos] = selected
-        return _build_sentence_from_lookup(
+        sentence = _build_sentence_from_lookup(
             tokens,
             "pt_to_em",
             lexicon_pt,
@@ -814,8 +893,9 @@ def translate(text: str, direction: str = "auto") -> str:
             phrase_pt_preferences=phrase_preferences,
             possessive_suffix_by_position=possessive_suffix_by_position,
         )
+        return _apply_phrase_punctuation_policy(text, sentence)
     if direction == "em_to_pt":
-        return _build_sentence_from_lookup(
+        sentence = _build_sentence_from_lookup(
             tokens,
             "em_to_pt",
             lexicon_pt,
@@ -825,6 +905,7 @@ def translate(text: str, direction: str = "auto") -> str:
             pronoun_em,
             grammar_profile,
         )
+        return _apply_phrase_punctuation_policy(text, sentence)
 
     auto_dir = _detect_direction(tokens, lexicon_pt, pronoun_pt, lexicon_em, pronoun_em)
     phrase_preferences: Dict[int, str] = {}
@@ -841,7 +922,8 @@ def translate(text: str, direction: str = "auto") -> str:
             for row in rows
         ]
         if len(learned_words) == len(word_tokens) and all(learned_words):
-            return _build_sentence_from_memory_words(tokens, learned_words)
+            sentence = _build_sentence_from_memory_words(tokens, learned_words)
+            return _apply_phrase_punctuation_policy(text, sentence)
         for row in rows:
             try:
                 pos = int(row.get("position_index") or 0)
@@ -851,7 +933,7 @@ def translate(text: str, direction: str = "auto") -> str:
             if pos > 0 and selected:
                 phrase_preferences[pos] = selected
 
-    return _build_sentence_from_lookup(
+    sentence = _build_sentence_from_lookup(
         tokens,
         auto_dir,
         lexicon_pt,
@@ -863,5 +945,6 @@ def translate(text: str, direction: str = "auto") -> str:
         phrase_pt_preferences=phrase_preferences,
         possessive_suffix_by_position=possessive_suffix_by_position,
     )
+    return _apply_phrase_punctuation_policy(text, sentence)
 
 
