@@ -1,7 +1,7 @@
-import math
+﻿import math
 import re
 import unicodedata
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from supabase_client_strict import (
     EmakuaResources,
@@ -89,19 +89,129 @@ _PT_ADJECTIVE_HINTS = {
 }
 
 
-"""Pipeline de tradução Emakua
+def _dedupe_keep_order(items: List[str]) -> List[str]:
+    out: List[str] = []
+    seen: Set[str] = set()
+    for item in items:
+        s = str(item or "").strip()
+        if not s:
+            continue
+        key = s.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(s)
+    return out
+
+
+def _extract_grammar_profile(grammar: Dict[str, Any]) -> Dict[str, Any]:
+    phonetics = grammar.get("phonetics", {}) if isinstance(grammar, dict) else {}
+    digraphs = phonetics.get("digraphs", {}) if isinstance(phonetics, dict) else {}
+    digraph_set = {
+        str(k).strip().lower()
+        for k in digraphs.keys()
+        if isinstance(k, str) and str(k).strip()
+    }
+    vowels = {"a", "e", "i", "o", "u"}
+    return {
+        "digraphs": digraph_set,
+        "vowels": vowels,
+    }
+
+
+def _extract_pronoun_pt_map(pronouns: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    result: Dict[str, Dict[str, Any]] = {}
+    if not isinstance(pronouns, dict):
+        return result
+
+    blocks: List[Dict[str, Any]] = []
+    for key in ("personal", "possessive"):
+        value = pronouns.get(key)
+        if isinstance(value, dict):
+            blocks.append(value)
+
+    for block in blocks:
+        for pt_pron, forms in block.items():
+            norm_pt = _normalize_pt(str(pt_pron))
+            if not norm_pt:
+                continue
+            if isinstance(forms, str):
+                raw_forms = [forms]
+            elif isinstance(forms, list):
+                raw_forms = [f for f in forms if isinstance(f, str)]
+            else:
+                continue
+            cleaned = _dedupe_keep_order([str(f).strip() for f in raw_forms])
+            if not cleaned:
+                continue
+            current = result.get(norm_pt, {})
+            existing_forms = current.get("forms", []) if isinstance(current, dict) else []
+            result[norm_pt] = {
+                "pt": str(pt_pron).strip() or norm_pt,
+                "forms": _dedupe_keep_order(existing_forms + cleaned),
+            }
+
+    return result
+
+
+def _candidate_quality_score_emakua(form: str, grammar_profile: Dict[str, Any]) -> int:
+    s = (form or "").strip().lower()
+    if not s:
+        return -10_000
+
+    score = 0
+    vowels: Set[str] = grammar_profile.get("vowels", {"a", "e", "i", "o", "u"})
+    digraphs: Set[str] = grammar_profile.get("digraphs", set())
+
+    # Prefer forms aligned with orthography notes (k in place of c/q).
+    if "c" not in s and "q" not in s:
+        score += 3
+
+    # Grammar note: words usually end in vowel.
+    if s[-1:] in vowels:
+        score += 2
+
+    # Slight bonus for recognized Emakua digraph usage.
+    for dg in digraphs:
+        if dg and dg in s:
+            score += 1
+
+    # Penalize noisy forms with many symbols.
+    if re.search(r"[^a-z' -]", s):
+        score -= 3
+
+    return score
+
+
+def _rank_candidates_for_emakua(
+    candidates: List[str],
+    grammar_profile: Dict[str, Any],
+) -> List[str]:
+    unique = _dedupe_keep_order(candidates)
+    ranked = sorted(
+        enumerate(unique),
+        key=lambda pair: (
+            -_candidate_quality_score_emakua(pair[1], grammar_profile),
+            pair[0],
+            pair[1].lower(),
+        ),
+    )
+    return [word for _, word in ranked]
+
+
+"""Pipeline de traduÃ§Ã£o Emakua
 
 Suporta dois sentidos:
-- PT -> Emakua (com correção ortográfica leve em PT)
+- PT -> Emakua (com correÃ§Ã£o ortogrÃ¡fica leve em PT)
 - Emakua -> PT
 
-Quando usado em modo "auto", detecta o sentido provável
-da frase com base no léxico e pronomes disponíveis.
+Quando usado em modo "auto", detecta o sentido provÃ¡vel
+da frase com base no lÃ©xico e pronomes disponÃ­veis.
 
-Os dados (léxico, gramática, pronomes) são carregados
-dinamicamente do Supabase em cada requisição, usando um
-cache em memória com TTL fornecido por supabase_client_strict.
-Nenhum JSON é carregado de forma global na importação do módulo.
+Os dados (lÃ©xico, gramÃ¡tica, pronomes) sÃ£o carregados
+dinamicamente do Supabase em cada requisiÃ§Ã£o, usando um
+cache em memÃ³ria com TTL fornecido por supabase_client_strict.
+Nenhum JSON Ã© carregado de forma global na importaÃ§Ã£o do mÃ³dulo.
 """
 
 
@@ -111,16 +221,18 @@ def _build_indexes(resources: EmakuaResources) -> Tuple[
     Dict[str, str],        # spell_vocab_pt
     Dict[str, List[str]],  # lexicon_em
     Dict[str, List[str]],  # pronoun_em
+    Dict[str, Any],        # grammar_profile
 ]:
-    """Constroi todos os índices necessários a partir dos recursos atuais.
+    """Constroi todos os Ã­ndices necessÃ¡rios a partir dos recursos atuais.
 
-    Esta função é chamada a partir das funções públicas de tradução,
+    Esta funÃ§Ã£o Ã© chamada a partir das funÃ§Ãµes pÃºblicas de traduÃ§Ã£o,
     garantindo que os dados sejam sempre derivados dos recursos
     obtidos dinamicamente (com TTL) do Supabase.
     """
 
     raw_lexicon: Dict[str, List[str]] = resources.lexicon
     pronouns = resources.pronouns
+    grammar_profile = _extract_grammar_profile(resources.grammar)
 
     lexicon_pt: Dict[str, List[str]] = {}
     pronoun_pt: Dict[str, List[str]] = {}
@@ -128,7 +240,7 @@ def _build_indexes(resources: EmakuaResources) -> Tuple[
     lexicon_em: Dict[str, List[str]] = {}
     pronoun_em: Dict[str, List[str]] = {}
 
-    # léxico
+    # lÃ©xico
     for pt_word, vals in raw_lexicon.items():
         if isinstance(vals, str):
             vals = [vals]
@@ -149,13 +261,13 @@ def _build_indexes(resources: EmakuaResources) -> Tuple[
         if not cleaned:
             continue
 
-        # índice PT -> Emakua
+        # Ã­ndice PT -> Emakua
         target_pt = lexicon_pt.setdefault(norm_pt, [])
         for c in cleaned:
             if c not in target_pt:
                 target_pt.append(c)
 
-        # índice Emakua -> PT (usamos lowercase simples)
+        # Ã­ndice Emakua -> PT (usamos lowercase simples)
         for em_form in cleaned:
             em_key = em_form.strip().lower()
             if not em_key:
@@ -165,18 +277,17 @@ def _build_indexes(resources: EmakuaResources) -> Tuple[
                 target_em.append(pt_word)
 
     # pronomes
-    _pers = pronouns.get("personal", {})
-    _poss = pronouns.get("possessive", {})
-    for pt_pron, forms in {**_pers, **_poss}.items():
-        norm_pt = _normalize_pt(pt_pron)
-        em_forms = [f.strip() for f in forms if isinstance(f, str)]
+    pronoun_map = _extract_pronoun_pt_map(pronouns)
+    for norm_pt, pron_payload in pronoun_map.items():
+        em_forms = pron_payload.get("forms", []) if isinstance(pron_payload, dict) else []
+        pt_display = str(pron_payload.get("pt") or norm_pt) if isinstance(pron_payload, dict) else norm_pt
         if not em_forms:
             continue
 
         # PT -> Emakua
         pronoun_pt[norm_pt] = em_forms
         if norm_pt not in spell_vocab_pt:
-            spell_vocab_pt[norm_pt] = pt_pron
+            spell_vocab_pt[norm_pt] = pt_display
 
         # Emakua -> PT
         for em_form in em_forms:
@@ -184,13 +295,13 @@ def _build_indexes(resources: EmakuaResources) -> Tuple[
             if not em_key:
                 continue
             target_em = pronoun_em.setdefault(em_key, [])
-            if pt_pron not in target_em:
-                target_em.append(pt_pron)
+            if pt_display not in target_em:
+                target_em.append(pt_display)
 
-    return lexicon_pt, pronoun_pt, spell_vocab_pt, lexicon_em, pronoun_em
+    return lexicon_pt, pronoun_pt, spell_vocab_pt, lexicon_em, pronoun_em, grammar_profile
 
 
-# --- Corretor ortográfico leve ---
+# --- Corretor ortogrÃ¡fico leve ---
 
 
 def _levenshtein(a: str, b: str) -> int:
@@ -211,7 +322,7 @@ def _levenshtein(a: str, b: str) -> int:
 
 
 def correct_spelling_pt(word: str, spell_vocab_pt: Dict[str, str]) -> str:
-    """Corretor ortográfico leve só para português."""
+    """Corretor ortogrÃ¡fico leve sÃ³ para portuguÃªs."""
 
     norm = _normalize_pt(word)
     if norm in spell_vocab_pt:
@@ -236,35 +347,31 @@ def lookup_pt_to_em(
     lexicon_pt: Dict[str, List[str]],
     pronoun_pt: Dict[str, List[str]],
     spell_vocab_pt: Dict[str, str],
+    grammar_profile: Optional[Dict[str, Any]] = None,
     missing_log: Optional[List[str]] = None,
 ) -> Dict:
-    """Lookup de português para Emakua, com correção ortográfica PT."""
-
+    """Lookup PT->Emakua com corretor leve em PT e ranking estavel."""
     corrected = correct_spelling_pt(word, spell_vocab_pt)
     norm = _normalize_pt(corrected)
     em_candidates: List[str] = []
-
     if norm in pronoun_pt:
         em_candidates.extend(pronoun_pt[norm])
-
     if norm in lexicon_pt:
         for v in lexicon_pt[norm]:
             if v not in em_candidates:
                 em_candidates.append(v)
-    # Garante no máximo 4 traduções por palavra
-    if len(em_candidates) > 4:
-        em_candidates = em_candidates[:4]
-    found = bool(em_candidates)
+    ranked = _rank_candidates_for_emakua(em_candidates, grammar_profile or {})
+    if len(ranked) > 4:
+        ranked = ranked[:4]
+    found = bool(ranked)
     if not found and missing_log is not None:
         missing_log.append(word)
-
     return {
         "source": word,
         "normalized": norm,
-        "candidates": em_candidates,
+        "candidates": ranked,
         "found": found,
     }
-
 
 def _resolve_preferred_pt_variant(
     token: str,
@@ -296,36 +403,32 @@ def lookup_em_to_pt(
     word: str,
     lexicon_em: Dict[str, List[str]],
     pronoun_em: Dict[str, List[str]],
+    grammar_profile: Optional[Dict[str, Any]] = None,
     missing_log: Optional[List[str]] = None,
 ) -> Dict:
-    """Lookup de Emakua para português (sem correção ortográfica)."""
-
+    """Lookup Emakua->PT com ordenacao estavel de variantes."""
     key = word.strip().lower()
     pt_candidates: List[str] = []
-
     if key in pronoun_em:
         pt_candidates.extend(pronoun_em[key])
-
     if key in lexicon_em:
         for v in lexicon_em[key]:
             if v not in pt_candidates:
                 pt_candidates.append(v)
-    # Garante no máximo 4 traduções por palavra
-    if len(pt_candidates) > 4:
-        pt_candidates = pt_candidates[:4]
-    found = bool(pt_candidates)
+    ranked = sorted(_dedupe_keep_order(pt_candidates), key=lambda x: x.lower())
+    if len(ranked) > 4:
+        ranked = ranked[:4]
+    found = bool(ranked)
     if not found and missing_log is not None:
         missing_log.append(word)
-
     return {
         "source": word,
         "normalized": key,
-        "candidates": pt_candidates,
+        "candidates": ranked,
         "found": found,
     }
 
-
-# --- Tokenização e construção de frase ---
+# --- TokenizaÃ§Ã£o e construÃ§Ã£o de frase ---
 
 
 def _tokenize(text: str) -> List[str]:
@@ -366,7 +469,7 @@ def _normalize_sentence_case(text: str) -> str:
 
 
 def _reorder_quality_pattern_pt(tokens: List[str]) -> List[str]:
-    """Regra 6: para padrão simples [adjetivo substantivo], reordena para substantivo + adjetivo."""
+    """Regra 6: para padrÃ£o simples [adjetivo substantivo], reordena para substantivo + adjetivo."""
     words = [t for t in tokens if not _is_punctuation(t)]
     if len(words) != 2:
         return tokens
@@ -378,9 +481,9 @@ def _reorder_quality_pattern_pt(tokens: List[str]) -> List[str]:
 
 
 def _prepare_pt_tokens(tokens: List[str]) -> Tuple[List[str], Dict[int, str]]:
-    """Aplica regras de pré-processamento PT:
+    """Aplica regras de prÃ©-processamento PT:
     - remove artigos definidos e 'da'
-    - remove pronomes possessivos e marca sufixo para a próxima palavra de conteúdo
+    - remove pronomes possessivos e marca sufixo para a prÃ³xima palavra de conteÃºdo
     """
     out_tokens: List[str] = []
     suffix_by_word_pos: Dict[int, str] = {}
@@ -450,27 +553,41 @@ def _build_sentence_from_lookup(
     spell_vocab_pt: Dict[str, str],
     lexicon_em: Dict[str, List[str]],
     pronoun_em: Dict[str, List[str]],
+    grammar_profile: Dict[str, Any],
     phrase_pt_preferences: Optional[Dict[int, str]] = None,
     possessive_suffix_by_position: Optional[Dict[int, str]] = None,
 ) -> str:
     missing: List[str] = []
     out_tokens: List[str] = []
-    # Caso especial: entrada de única palavra (sem pontuação)
-    # Retorna até 4 traduções possíveis da palavra.
+    # Caso especial: entrada de Ãºnica palavra (sem pontuaÃ§Ã£o)
+    # Retorna atÃ© 4 traduÃ§Ãµes possÃ­veis da palavra.
     if len(tokens) == 1 and not _is_punctuation(tokens[0]):
         tok = tokens[0]
         if direction == "pt_to_em":
-            info = lookup_pt_to_em(tok, lexicon_pt, pronoun_pt, spell_vocab_pt, missing)
+            info = lookup_pt_to_em(
+                tok,
+                lexicon_pt,
+                pronoun_pt,
+                spell_vocab_pt,
+                grammar_profile=grammar_profile,
+                missing_log=missing,
+            )
         else:  # em_to_pt
-            info = lookup_em_to_pt(tok, lexicon_em, pronoun_em, missing)
+            info = lookup_em_to_pt(
+                tok,
+                lexicon_em,
+                pronoun_em,
+                grammar_profile=grammar_profile,
+                missing_log=missing,
+            )
 
         candidates = info["candidates"][:4]
         if candidates:
-            # Regra 1 (lista): cada item inicia com maiúscula.
+            # Regra 1 (lista): cada item inicia com maiÃºscula.
             sentence = ", ".join(_normalize_list_case(candidates))
             return sentence
 
-        # Sem candidatos conhecidos, devolve a própria palavra
+        # Sem candidatos conhecidos, devolve a prÃ³pria palavra
         return tok
     word_position = 0
     for tok in tokens:
@@ -480,9 +597,22 @@ def _build_sentence_from_lookup(
 
         word_position += 1
         if direction == "pt_to_em":
-            info = lookup_pt_to_em(tok, lexicon_pt, pronoun_pt, spell_vocab_pt, missing)
+            info = lookup_pt_to_em(
+                tok,
+                lexicon_pt,
+                pronoun_pt,
+                spell_vocab_pt,
+                grammar_profile=grammar_profile,
+                missing_log=missing,
+            )
         else:  # em_to_pt
-            info = lookup_em_to_pt(tok, lexicon_em, pronoun_em, missing)
+            info = lookup_em_to_pt(
+                tok,
+                lexicon_em,
+                pronoun_em,
+                grammar_profile=grammar_profile,
+                missing_log=missing,
+            )
 
         candidates = info["candidates"]
         if candidates:
@@ -516,7 +646,7 @@ def _build_sentence_from_lookup(
             out_tokens.append(tok)
 
     sentence = _rebuild_sentence_from_tokens(out_tokens)
-    # Regra 1 (frase): só a primeira palavra em maiúscula.
+    # Regra 1 (frase): sÃ³ a primeira palavra em maiÃºscula.
     return _normalize_sentence_case(sentence)
 
 
@@ -529,8 +659,8 @@ def _count_known_tokens(
 ) -> Tuple[int, int]:
     """Conta quantos tokens parecem PT e quantos parecem Emakua.
 
-    Usa apenas presença nos índices (sem correção),
-    para não distorcer a detecção de língua.
+    Usa apenas presenÃ§a nos Ã­ndices (sem correÃ§Ã£o),
+    para nÃ£o distorcer a detecÃ§Ã£o de lÃ­ngua.
     """
 
     pt_count = 0
@@ -555,7 +685,7 @@ def _detect_direction(
     lexicon_em: Dict[str, List[str]],
     pronoun_em: Dict[str, List[str]],
 ) -> str:
-    """Detecta automaticamente se a frase é PT ou Emakua."""
+    """Detecta automaticamente se a frase Ã© PT ou Emakua."""
 
     pt_count, em_count = _count_known_tokens(tokens, lexicon_pt, pronoun_pt, lexicon_em, pronoun_em)
     if em_count > pt_count:
@@ -570,7 +700,7 @@ def translate_pt_to_em(text: str) -> str:
         return ""
 
     resources = load_resources()
-    lexicon_pt, pronoun_pt, spell_vocab_pt, lexicon_em, pronoun_em = _build_indexes(resources)
+    lexicon_pt, pronoun_pt, spell_vocab_pt, lexicon_em, pronoun_em, grammar_profile = _build_indexes(resources)
 
     tokens = _tokenize(text)
     tokens = _reorder_quality_pattern_pt(tokens)
@@ -603,6 +733,7 @@ def translate_pt_to_em(text: str) -> str:
         spell_vocab_pt,
         lexicon_em,
         pronoun_em,
+        grammar_profile,
         phrase_pt_preferences=phrase_preferences,
         possessive_suffix_by_position=possessive_suffix_by_position,
     )
@@ -614,7 +745,7 @@ def translate_em_to_pt(text: str) -> str:
         return ""
 
     resources = load_resources()
-    lexicon_pt, pronoun_pt, spell_vocab_pt, lexicon_em, pronoun_em = _build_indexes(resources)
+    lexicon_pt, pronoun_pt, spell_vocab_pt, lexicon_em, pronoun_em, grammar_profile = _build_indexes(resources)
 
     tokens = _tokenize(text)
     return _build_sentence_from_lookup(
@@ -625,15 +756,16 @@ def translate_em_to_pt(text: str) -> str:
         spell_vocab_pt,
         lexicon_em,
         pronoun_em,
+        grammar_profile,
     )
 
 
 def translate(text: str, direction: str = "auto") -> str:
-    """Tradução de texto entre PT e Emakua.
+    """TraduÃ§Ã£o de texto entre PT e Emakua.
 
     direction:
-      - "pt_to_em": força PT -> Emakua
-      - "em_to_pt": força Emakua -> PT
+      - "pt_to_em": forÃ§a PT -> Emakua
+      - "em_to_pt": forÃ§a Emakua -> PT
       - "auto"   : detecta automaticamente
     """
 
@@ -642,9 +774,9 @@ def translate(text: str, direction: str = "auto") -> str:
         return ""
 
     # Carrega recursos dinamicamente (com cache TTL) a cada chamada,
-    # garantindo que a consulta ao Supabase faça parte do fluxo da rota.
+    # garantindo que a consulta ao Supabase faÃ§a parte do fluxo da rota.
     resources = load_resources()
-    lexicon_pt, pronoun_pt, spell_vocab_pt, lexicon_em, pronoun_em = _build_indexes(resources)
+    lexicon_pt, pronoun_pt, spell_vocab_pt, lexicon_em, pronoun_em, grammar_profile = _build_indexes(resources)
 
     tokens = _tokenize(text)
 
@@ -678,6 +810,7 @@ def translate(text: str, direction: str = "auto") -> str:
             spell_vocab_pt,
             lexicon_em,
             pronoun_em,
+            grammar_profile,
             phrase_pt_preferences=phrase_preferences,
             possessive_suffix_by_position=possessive_suffix_by_position,
         )
@@ -690,6 +823,7 @@ def translate(text: str, direction: str = "auto") -> str:
             spell_vocab_pt,
             lexicon_em,
             pronoun_em,
+            grammar_profile,
         )
 
     auto_dir = _detect_direction(tokens, lexicon_pt, pronoun_pt, lexicon_em, pronoun_em)
@@ -725,6 +859,9 @@ def translate(text: str, direction: str = "auto") -> str:
         spell_vocab_pt,
         lexicon_em,
         pronoun_em,
+        grammar_profile,
         phrase_pt_preferences=phrase_preferences,
         possessive_suffix_by_position=possessive_suffix_by_position,
     )
+
+

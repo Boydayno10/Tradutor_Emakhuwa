@@ -2,7 +2,7 @@ import os
 import time
 import unicodedata
 from dataclasses import dataclass
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from supabase import Client, create_client
 
@@ -65,18 +65,25 @@ def _fetch_resource(name: str) -> Dict[str, Any]:
     return data[0]["metadata"]
 
 
-def _fetch_all_rows(table: str, select_expr: str, batch_size: int = 1000) -> List[Dict[str, Any]]:
+def _fetch_all_rows(
+    table: str,
+    select_expr: str,
+    batch_size: int = 1000,
+    order_by: Optional[str] = None,
+    order_desc: bool = False,
+) -> List[Dict[str, Any]]:
     rows: List[Dict[str, Any]] = []
     start = 0
     while True:
         end = start + batch_size - 1
-        resp = (
+        query = (
             _client
             .table(table)
             .select(select_expr)
-            .range(start, end)
-            .execute()
         )
+        if order_by:
+            query = query.order(order_by, desc=order_desc)
+        resp = query.range(start, end).execute()
         data = getattr(resp, "data", None) or []
         if not data:
             break
@@ -144,10 +151,24 @@ def get_pt_emakua_lexicon() -> Dict[str, Any]:
     try:
         variant_rows = _fetch_all_rows(
             VARIANTS_TABLE_NAME,
-            "pt,macua",
+            "pt,macua,normalized_pt,created_at,updated_at",
+            order_by="updated_at",
+            order_desc=True,
         )
     except Exception:
         variant_rows = []
+
+    # Ordenacao deterministica para evitar retorno aleatorio de variantes.
+    variant_rows = sorted(
+        variant_rows,
+        key=lambda row: (
+            str((row or {}).get("normalized_pt") or _normalize_text(str((row or {}).get("pt") or ""))),
+            str((row or {}).get("updated_at") or ""),
+            str((row or {}).get("created_at") or ""),
+            str((row or {}).get("macua") or "").lower(),
+        ),
+        reverse=True,
+    )
 
     # Preserve existing key casing where possible.
     key_by_norm = {_normalize_text(k): k for k in normalized.keys()}

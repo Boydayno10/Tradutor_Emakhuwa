@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from supabase_client_strict import VARIANTS_TABLE_NAME, get_client
 from translation_pipeline import (
@@ -170,8 +170,10 @@ def _fetch_rows_by_norm_pt(norm_pt: str) -> List[Dict[str, Any]]:
     resp = (
         client
         .table(VARIANTS_TABLE_NAME)
-        .select("id,pt,macua,normalized_pt,normalized_macua")
+        .select("id,pt,macua,normalized_pt,normalized_macua,created_at,updated_at")
         .eq("normalized_pt", norm_pt)
+        .order("updated_at", desc=True)
+        .order("created_at", desc=True)
         .execute()
     )
     return getattr(resp, "data", None) or []
@@ -198,7 +200,9 @@ def _fetch_rows_by_fuzzy_norm_pt(norm_pt: str, max_distance: int = 2) -> List[Di
     resp = (
         client
         .table(VARIANTS_TABLE_NAME)
-        .select("id,pt,macua,normalized_pt,normalized_macua")
+        .select("id,pt,macua,normalized_pt,normalized_macua,created_at,updated_at")
+        .order("updated_at", desc=True)
+        .order("created_at", desc=True)
         .limit(4000)
         .execute()
     )
@@ -231,9 +235,16 @@ def _collect_candidates_for_token(
     lexicon_pt: Dict[str, List[str]],
     pronoun_pt: Dict[str, List[str]],
     spell_vocab_pt: Dict[str, str],
+    grammar_profile: Optional[Dict[str, Any]] = None,
     fuzzy: bool = False,
 ) -> List[str]:
-    info = lookup_pt_to_em(token_pt, lexicon_pt, pronoun_pt, spell_vocab_pt)
+    info = lookup_pt_to_em(
+        token_pt,
+        lexicon_pt,
+        pronoun_pt,
+        spell_vocab_pt,
+        grammar_profile=grammar_profile,
+    )
     norm_pt = str(info.get("normalized") or _normalize_pt(token_pt))
 
     candidates: List[str] = []
@@ -268,9 +279,16 @@ def _collect_candidates_for_token(
 
 def _collect_variants_for_word(word: str) -> Tuple[Dict[str, str], List[Dict[str, str]]]:
     resources = load_resources()
-    lexicon_pt, pronoun_pt, spell_vocab_pt, _, _ = _build_indexes(resources)
+    lexicon_pt, pronoun_pt, spell_vocab_pt, _, _, grammar_profile = _build_indexes(resources)
 
-    candidates = _collect_candidates_for_token(word, lexicon_pt, pronoun_pt, spell_vocab_pt, fuzzy=True)
+    candidates = _collect_candidates_for_token(
+        word,
+        lexicon_pt,
+        pronoun_pt,
+        spell_vocab_pt,
+        grammar_profile=grammar_profile,
+        fuzzy=True,
+    )
     pairs = [{"pt": word.strip(), "macua": c} for c in candidates]
 
     deduped = _dedupe_pairs(pairs)
@@ -288,7 +306,7 @@ def _join_phrase_tokens(parts: List[str]) -> str:
 def get_phrase_correction_payload(texto: str) -> Dict[str, Any]:
     phrase = (texto or "").strip()
     resources = load_resources()
-    lexicon_pt, pronoun_pt, spell_vocab_pt, _, _ = _build_indexes(resources)
+    lexicon_pt, pronoun_pt, spell_vocab_pt, _, _, grammar_profile = _build_indexes(resources)
 
     tokens = _tokenize(phrase)
     memory_rows = _fetch_phrase_memory_rows(_canonicalize_phrase_pt(phrase))
@@ -321,7 +339,14 @@ def get_phrase_correction_payload(texto: str) -> Dict[str, Any]:
             continue
 
         pos_counter += 1
-        candidates = _collect_candidates_for_token(token, lexicon_pt, pronoun_pt, spell_vocab_pt, fuzzy=False)
+        candidates = _collect_candidates_for_token(
+            token,
+            lexicon_pt,
+            pronoun_pt,
+            spell_vocab_pt,
+            grammar_profile=grammar_profile,
+            fuzzy=False,
+        )
         selected = candidates[0] if candidates else token
         preferred = memory_map.get(pos_counter)
         if preferred:
