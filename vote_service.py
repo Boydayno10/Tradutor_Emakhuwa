@@ -1,5 +1,6 @@
 import re
 import unicodedata
+from datetime import timedelta
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Tuple
 
@@ -7,6 +8,11 @@ from supabase_client_strict import VARIANTS_TABLE_NAME, get_client
 
 
 VOTES_TABLE = "emakua_variant_votes"
+COOLDOWN_TABLE = "emakua_vote_cooldowns"
+
+# Progressivo por texto normalizado (mesma palavra/frase)
+# 1o voto: 21m, 2o: 45m, 3o: 70m, 4o: 120m, depois continua crescendo.
+_COOLDOWN_MINUTES_STEPS = [21, 45, 70, 120, 180, 240, 360, 480, 720, 1440]
 
 
 def _normalize(text: str) -> str:
@@ -15,11 +21,109 @@ def _normalize(text: str) -> str:
     return "".join(ch for ch in value if unicodedata.category(ch) != "Mn")
 
 
+def _normalize_source_text(text: str) -> str:
+    raw = (text or "").strip().lower()
+    raw = re.sub(r"\s+", " ", raw)
+    raw = unicodedata.normalize("NFD", raw)
+    return "".join(ch for ch in raw if unicodedata.category(ch) != "Mn")
+
+
 def _tokenize_words(text: str) -> List[str]:
     raw = (text or "").strip()
     if not raw:
         return []
     return [t for t in re.findall(r"[A-Za-zÀ-ÖØ-öø-ÿ']+", raw) if t.strip()]
+
+
+def _cooldown_minutes_for_vote_count(vote_count_after: int) -> int:
+    if vote_count_after <= 0:
+        return _COOLDOWN_MINUTES_STEPS[0]
+    idx = vote_count_after - 1
+    if idx < len(_COOLDOWN_MINUTES_STEPS):
+        return _COOLDOWN_MINUTES_STEPS[idx]
+
+    # Continua crescendo de forma controlada apos a tabela base.
+    last = _COOLDOWN_MINUTES_STEPS[-1]
+    extra_steps = idx - (len(_COOLDOWN_MINUTES_STEPS) - 1)
+    return last + (extra_steps * 180)
+
+
+def _format_wait_delta(seconds_remaining: int) -> str:
+    secs = max(1, int(seconds_remaining))
+    hours = secs // 3600
+    minutes = (secs % 3600) // 60
+    if hours > 0:
+        return f"{hours}h{minutes:02d}m"
+    if minutes > 0:
+        return f"{minutes}m"
+    return f"{secs}s"
+
+
+def _check_and_advance_cooldown(user_id: str, source_text: str) -> Dict[str, Any]:
+    client = get_client()
+    normalized_source = _normalize_source_text(source_text)
+    if not normalized_source:
+        raise RuntimeError("Texto de origem invalido para votacao")
+
+    rows_resp = (
+        client.table(COOLDOWN_TABLE)
+        .select("id,vote_count,next_allowed_at")
+        .eq("user_id", user_id)
+        .eq("normalized_source_text", normalized_source)
+        .limit(1)
+        .execute()
+    )
+    rows = getattr(rows_resp, "data", None) or []
+
+    now = datetime.now(timezone.utc)
+    current_count = 0
+    row_id = None
+    next_allowed_at_raw = None
+    if rows:
+        row = rows[0] or {}
+        row_id = str(row.get("id") or "").strip() or None
+        current_count = int(row.get("vote_count") or 0)
+        next_allowed_at_raw = str(row.get("next_allowed_at") or "").strip()
+
+    if next_allowed_at_raw:
+        try:
+            next_allowed = datetime.fromisoformat(next_allowed_at_raw.replace("Z", "+00:00"))
+        except Exception:
+            next_allowed = None
+        if next_allowed is not None and next_allowed > now:
+            remaining = int((next_allowed - now).total_seconds())
+            raise RuntimeError(
+                f"Para evitar abusos, voce so pode votar novamente nesta mesma traducao daqui a {_format_wait_delta(remaining)}."
+            )
+
+    new_count = current_count + 1
+    cooldown_minutes = _cooldown_minutes_for_vote_count(new_count)
+    next_allowed_at = now + timedelta(minutes=cooldown_minutes)
+
+    payload = {
+        "user_id": user_id,
+        "source_text": source_text,
+        "normalized_source_text": normalized_source,
+        "vote_count": new_count,
+        "last_voted_at": now.isoformat(),
+        "next_allowed_at": next_allowed_at.isoformat(),
+    }
+
+    if row_id:
+        (
+            client.table(COOLDOWN_TABLE)
+            .update(payload)
+            .eq("id", row_id)
+            .execute()
+        )
+    else:
+        client.table(COOLDOWN_TABLE).insert(payload).execute()
+
+    return {
+        "vote_count": new_count,
+        "next_allowed_at": next_allowed_at.isoformat(),
+        "cooldown_minutes": cooldown_minutes,
+    }
 
 
 def _extract_pairs(source_text: str, translated_text: str) -> List[Tuple[str, str]]:
@@ -123,6 +227,8 @@ def register_translation_vote(
     if vote not in (-1, 1):
         raise RuntimeError("Campo 'vote' deve ser -1 ou 1")
 
+    cooldown_info = _check_and_advance_cooldown(user_id, source_text)
+
     pairs = _extract_pairs(source_text, translated_text)
     if not pairs:
         raise RuntimeError("Nao foi possivel extrair pares de palavras para votar")
@@ -168,4 +274,5 @@ def register_translation_vote(
         "saved": len(updated),
         "vote": vote,
         "updated": updated,
+        "cooldown": cooldown_info,
     }
