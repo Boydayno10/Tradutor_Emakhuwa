@@ -10,6 +10,7 @@ from correction_service import (
     save_phrase_learning,
     upsert_variants,
 )
+from linguistic_analyzer import analyze_linguistic_intent
 from supabase_client_strict import get_client
 from translation_pipeline import translate
 
@@ -105,6 +106,27 @@ def correcao_get_route():
         return jsonify({"error": "Parametro 'palavra' e obrigatorio"}), 400
     try:
         payload = get_correction_payload(palavra)
+        return jsonify(payload)
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/linguistic/analyze", methods=["POST"])
+def linguistic_analyze_route():
+    data = request.get_json(silent=True) or {}
+    text = str(data.get("text") or "").strip()
+    question = str(data.get("question") or "").strip()
+    model = str(data.get("model") or "").strip()
+
+    if not text:
+        return jsonify({"error": "Campo 'text' e obrigatorio"}), 400
+
+    try:
+        payload = analyze_linguistic_intent(
+            text=text,
+            question=question,
+            model=model or None,
+        )
         return jsonify(payload)
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
