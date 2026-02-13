@@ -544,15 +544,24 @@ def _apply_phrase_punctuation_policy(source_text: str, translated: str) -> str:
 
 
 def _reorder_quality_pattern_pt(tokens: List[str]) -> List[str]:
-    """Regra 6: para padrÃ£o simples [adjetivo substantivo], reordena para substantivo + adjetivo."""
-    words = [t for t in tokens if not _is_punctuation(t)]
-    if len(words) != 2:
+    """Regra 6: reordena adjetivo + substantivo para substantivo + adjetivo.
+
+    Mantem pontuacao e cobre tanto frases de 2 palavras quanto frases maiores.
+    """
+    words_with_idx = [(idx, tok) for idx, tok in enumerate(tokens) if not _is_punctuation(tok)]
+    if len(words_with_idx) < 2:
         return tokens
-    first_norm = _normalize_pt(words[0])
-    second_norm = _normalize_pt(words[1])
-    if first_norm in _PT_ADJECTIVE_HINTS and second_norm not in _PT_ADJECTIVE_HINTS:
-        return [words[1], words[0]]
-    return tokens
+
+    result = list(tokens)
+    for i in range(len(words_with_idx) - 1):
+        idx_a, tok_a = words_with_idx[i]
+        idx_b, tok_b = words_with_idx[i + 1]
+        norm_a = _normalize_pt(tok_a)
+        norm_b = _normalize_pt(tok_b)
+        if norm_a in _PT_ADJECTIVE_HINTS and norm_b not in _PT_ADJECTIVE_HINTS:
+            # Swap local pair to enforce noun + adjective.
+            result[idx_a], result[idx_b] = result[idx_b], result[idx_a]
+    return result
 
 
 def _prepare_pt_tokens(tokens: List[str]) -> Tuple[List[str], Dict[int, str]]:
@@ -565,6 +574,18 @@ def _prepare_pt_tokens(tokens: List[str]) -> Tuple[List[str], Dict[int, str]]:
     pending_suffix: Optional[str] = None
     word_pos = 0
 
+    filtered_word_norms: List[str] = []
+    for tok in tokens:
+        if _is_punctuation(tok):
+            continue
+        norm = _normalize_pt(tok)
+        if norm in _OMIT_PT_TOKENS:
+            continue
+        if norm in _POSSESSIVE_SUFFIX_BY_PRONOUN:
+            continue
+        filtered_word_norms.append(norm)
+
+    kept_word_index = 0
     for tok in tokens:
         if _is_punctuation(tok):
             out_tokens.append(tok)
@@ -576,14 +597,32 @@ def _prepare_pt_tokens(tokens: List[str]) -> Tuple[List[str], Dict[int, str]]:
 
         suffix = _POSSESSIVE_SUFFIX_BY_PRONOUN.get(norm)
         if suffix is not None:
+            # Posposicao: "carro meu" -> sufixo no substantivo anterior.
+            if word_pos > 0 and kept_word_index >= 1:
+                prev_norm = filtered_word_norms[kept_word_index - 1]
+                if prev_norm not in _PT_ADJECTIVE_HINTS:
+                    suffix_by_word_pos[word_pos] = suffix
+                    pending_suffix = None
+                    continue
+
             pending_suffix = suffix
             continue
 
         out_tokens.append(tok)
         word_pos += 1
+        kept_word_index += 1
+
         if pending_suffix:
+            # Se vier adjetivo apos possessivo (ex.: "meu lindo carro"),
+            # aguardamos o proximo substantivo para receber o sufixo.
+            if norm in _PT_ADJECTIVE_HINTS:
+                continue
             suffix_by_word_pos[word_pos] = pending_suffix
             pending_suffix = None
+
+    # Fallback: se nao encontramos substantivo depois, aplica no ultimo termo de conteudo.
+    if pending_suffix and word_pos > 0:
+        suffix_by_word_pos[word_pos] = pending_suffix
 
     return out_tokens, suffix_by_word_pos
 
@@ -658,6 +697,14 @@ def _build_sentence_from_lookup(
 
         candidates = info["candidates"][:4]
         if candidates:
+            if direction == "pt_to_em" and possessive_suffix_by_position:
+                # Regra de possessivo tambem para casos que viram
+                # "frase de 1 palavra" apos preprocessamento (ex.: "Minha casa").
+                chosen = candidates[0]
+                suffix = possessive_suffix_by_position.get(1)
+                if suffix and not chosen.lower().endswith(suffix.lower()):
+                    chosen = f"{chosen}{suffix}"
+                return _normalize_sentence_case(chosen)
             # Regra 1 (lista): cada item inicia com maiÃºscula.
             sentence = ", ".join(_normalize_list_case(candidates))
             return sentence
