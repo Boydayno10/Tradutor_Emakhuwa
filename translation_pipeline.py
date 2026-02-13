@@ -390,6 +390,8 @@ def lookup_pt_to_em(
             if v not in em_candidates:
                 em_candidates.append(v)
     ranked = _rank_candidates_for_emakua(em_candidates, grammar_profile or {})
+    if not ranked and norm in _POSSESSIVE_SUFFIX_BY_PRONOUN:
+        ranked = [_POSSESSIVE_SUFFIX_BY_PRONOUN[norm]]
     if len(ranked) > 4:
         ranked = ranked[:4]
     found = bool(ranked)
@@ -584,6 +586,7 @@ def _prepare_pt_tokens(tokens: List[str]) -> Tuple[List[str], Dict[int, str]]:
         if norm in _POSSESSIVE_SUFFIX_BY_PRONOUN:
             continue
         filtered_word_norms.append(norm)
+    has_content_words = bool(filtered_word_norms)
 
     kept_word_index = 0
     for tok in tokens:
@@ -597,6 +600,13 @@ def _prepare_pt_tokens(tokens: List[str]) -> Tuple[List[str], Dict[int, str]]:
 
         suffix = _POSSESSIVE_SUFFIX_BY_PRONOUN.get(norm)
         if suffix is not None:
+            # Mantem pronome possessivo isolado para permitir traducao direta
+            # (ex.: "meu" -> "ka"), mesmo sem entrada explicita no banco.
+            if not has_content_words:
+                out_tokens.append(tok)
+                word_pos += 1
+                kept_word_index += 1
+                continue
             # Posposicao: "carro meu" -> sufixo no substantivo anterior.
             if word_pos > 0 and kept_word_index >= 1:
                 prev_norm = filtered_word_norms[kept_word_index - 1]

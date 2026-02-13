@@ -58,16 +58,25 @@ def get_participar_config(max_per_topic: int = 3) -> Dict[str, Any]:
 
     for topic, items in by_topic_candidates.items():
         uniq = list(dict.fromkeys(items))
-        random.shuffle(uniq)
-        questions_by_topic[topic] = uniq[: max(1, max_per_topic)]
+        sample_size = min(len(uniq), max(1, max_per_topic))
+        questions_by_topic[topic] = random.sample(uniq, sample_size)
 
     # Fallback minimal set if DB has no active rows.
     if not questions_by_topic:
-        questions_by_topic["Geral"] = [
+        fallback_pool = [
             "A lingua local vive",
             "Nosso povo aprende",
             "Casa bonita",
+            "Minha escola cresce",
+            "Nosso bairro canta",
+            "A crianca aprende",
+            "Pessoa fala bem",
+            "Livro novo chega",
         ]
+        questions_by_topic["Geral"] = random.sample(
+            fallback_pool,
+            min(3, len(fallback_pool)),
+        )
 
     return {
         "privacy_policy_url": privacy_url,
@@ -76,4 +85,3 @@ def get_participar_config(max_per_topic: int = 3) -> Dict[str, Any]:
             for topic, questions in questions_by_topic.items()
         ],
     }
-
