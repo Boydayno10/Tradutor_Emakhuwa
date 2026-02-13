@@ -387,16 +387,18 @@ def _find_similar_pt_keys(
         if not cand or cand == norm:
             continue
 
-        # Prefix proximity is important for families like branco/branca.
-        prefix_bonus = 0
-        if len(norm) >= 3 and len(cand) >= 3 and norm[:3] == cand[:3]:
-            prefix_bonus = -1
-
-        # Keep bounded cost: stronger for short words.
+        # Similaridade conservadora para evitar "embaralhar" traducoes.
         dist = _levenshtein(norm, cand)
-        max_dist = 1 if len(norm) <= 4 else 2
-        if dist <= max_dist or (prefix_bonus < 0 and dist <= 3):
-            out.append((dist + prefix_bonus, cand))
+        max_dist = 1 if len(norm) <= 6 else 2
+        if dist > max_dist:
+            continue
+
+        # Se distancia for maior (2), exige inicio parecido para manter contexto.
+        if dist == 2:
+            if len(norm) < 3 or len(cand) < 3 or norm[:3] != cand[:3]:
+                continue
+
+        out.append((dist, cand))
 
     out.sort(key=lambda item: (item[0], item[1]))
     return [cand for _, cand in out[:max_items]]
@@ -421,15 +423,15 @@ def lookup_pt_to_em(
             if v not in em_candidates:
                 em_candidates.append(v)
 
-    # Hybrid matching: include near PT variants when useful.
-    # Example: "branca" can bring entries from "branco".
-    for similar_key in _find_similar_pt_keys(norm, lexicon_pt, pronoun_pt):
-        for v in pronoun_pt.get(similar_key, []):
-            if v not in em_candidates:
-                em_candidates.append(v)
-        for v in lexicon_pt.get(similar_key, []):
-            if v not in em_candidates:
-                em_candidates.append(v)
+    # Regra principal: so busca semelhantes se NAO houver match exato.
+    if not em_candidates:
+        for similar_key in _find_similar_pt_keys(norm, lexicon_pt, pronoun_pt):
+            for v in pronoun_pt.get(similar_key, []):
+                if v not in em_candidates:
+                    em_candidates.append(v)
+            for v in lexicon_pt.get(similar_key, []):
+                if v not in em_candidates:
+                    em_candidates.append(v)
     ranked = _rank_candidates_for_emakua(em_candidates, grammar_profile or {})
     if not ranked and norm in _POSSESSIVE_SUFFIX_BY_PRONOUN:
         ranked = [_POSSESSIVE_SUFFIX_BY_PRONOUN[norm]]
