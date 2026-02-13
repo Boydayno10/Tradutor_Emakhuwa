@@ -11,6 +11,7 @@ from correction_service import (
     upsert_variants,
 )
 from linguistic_analyzer import analyze_linguistic_intent
+from participar_service import get_participar_config
 from pdf_training_pipeline import build_training_artifacts
 from supabase_client_strict import get_client
 from training_knowledge_loader import clear_training_knowledge_cache, load_training_knowledge
@@ -108,6 +109,15 @@ def correcao_get_route():
         return jsonify({"error": "Parametro 'palavra' e obrigatorio"}), 400
     try:
         payload = get_correction_payload(palavra)
+        return jsonify(payload)
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/participar/config", methods=["GET"])
+def participar_config_route():
+    try:
+        payload = get_participar_config(max_per_topic=3)
         return jsonify(payload)
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500

@@ -22,6 +22,43 @@ def _normalize_macua(text: str) -> str:
     return (text or "").strip().lower()
 
 
+def _classify_pt_token(token: str) -> str:
+    norm = _normalize_pt(token or "")
+    if not norm:
+        return "other"
+    if norm in {"o", "a", "os", "as"}:
+        return "article"
+    if norm in {"da", "de", "do", "das", "dos", "em", "na", "no", "para", "com"}:
+        return "preposition"
+    if norm in {
+        "meu",
+        "minha",
+        "meus",
+        "minhas",
+        "nosso",
+        "nossa",
+        "nossos",
+        "nossas",
+        "seu",
+        "sua",
+        "seus",
+        "suas",
+        "teu",
+        "tua",
+        "teus",
+        "tuas",
+        "vosso",
+        "vossa",
+        "vossos",
+        "vossas",
+    }:
+        return "pronoun"
+    # Heuristica simples: adjetivos frequentes do projeto.
+    if norm in {"bonito", "bonita", "caro", "cara", "grande", "pequeno", "nova", "novo", "velho", "velha"}:
+        return "adjective"
+    return "noun_or_other"
+
+
 def _canonicalize_phrase_pt(text: str) -> str:
     tokens = _tokenize(text or "")
     out: List[str] = []
@@ -34,8 +71,8 @@ def _canonicalize_phrase_pt(text: str) -> str:
     return raw.replace(" ,", ",").replace(" .", ".").replace(" !", "!").replace(" ?", "?").replace(" ;", ";").replace(" :", ":")
 
 
-def _dedupe_pairs(items: List[Dict[str, str]]) -> List[Dict[str, str]]:
-    out: List[Dict[str, str]] = []
+def _dedupe_pairs(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
     seen = set()
     for item in items:
         pt = str(item.get("pt") or "").strip()
@@ -46,7 +83,14 @@ def _dedupe_pairs(items: List[Dict[str, str]]) -> List[Dict[str, str]]:
         if key in seen:
             continue
         seen.add(key)
-        out.append({"pt": pt, "macua": macua})
+        out.append(
+            {
+                "pt": pt,
+                "macua": macua,
+                "priority": int(item.get("priority") or 1000),
+                "word_class": str(item.get("word_class") or "").strip(),
+            }
+        )
     return out
 
 
@@ -170,8 +214,9 @@ def _fetch_rows_by_norm_pt(norm_pt: str) -> List[Dict[str, Any]]:
     resp = (
         client
         .table(VARIANTS_TABLE_NAME)
-        .select("id,pt,macua,normalized_pt,normalized_macua,created_at,updated_at")
+        .select("id,pt,macua,normalized_pt,normalized_macua,priority,word_class,created_at,updated_at")
         .eq("normalized_pt", norm_pt)
+        .order("priority", desc=False)
         .order("updated_at", desc=True)
         .order("created_at", desc=True)
         .execute()
@@ -200,7 +245,8 @@ def _fetch_rows_by_fuzzy_norm_pt(norm_pt: str, max_distance: int = 2) -> List[Di
     resp = (
         client
         .table(VARIANTS_TABLE_NAME)
-        .select("id,pt,macua,normalized_pt,normalized_macua,created_at,updated_at")
+        .select("id,pt,macua,normalized_pt,normalized_macua,priority,word_class,created_at,updated_at")
+        .order("priority", desc=False)
         .order("updated_at", desc=True)
         .order("created_at", desc=True)
         .limit(4000)
@@ -237,7 +283,7 @@ def _collect_candidates_for_token(
     spell_vocab_pt: Dict[str, str],
     grammar_profile: Optional[Dict[str, Any]] = None,
     fuzzy: bool = False,
-) -> List[str]:
+) -> List[Dict[str, Any]]:
     info = lookup_pt_to_em(
         token_pt,
         lexicon_pt,
@@ -247,13 +293,41 @@ def _collect_candidates_for_token(
     )
     norm_pt = str(info.get("normalized") or _normalize_pt(token_pt))
 
-    candidates: List[str] = []
-    for c in info.get("candidates", []) or []:
-        s = str(c).strip()
-        if s and s.lower() not in {v.lower() for v in candidates}:
-            candidates.append(s)
+    candidates: List[Dict[str, Any]] = []
+
+    def append_candidate(macua: str, source: str, priority: int, word_class: str = "") -> None:
+        s = str(macua).strip()
+        if not s:
+            return
+        key = s.lower()
+        if any(str(item.get("macua") or "").strip().lower() == key for item in candidates):
+            return
+        candidates.append(
+            {
+                "macua": s,
+                "source": source,
+                "priority": int(priority),
+                "word_class": word_class or "",
+            }
+        )
 
     dist_limit = _pt_norm_distance_limit(norm_pt)
+
+    # Prioriza variantes persistidas no banco (ordem editada pelo utilizador).
+    rows = _fetch_rows_by_norm_pt(norm_pt)
+    if fuzzy and not rows:
+        rows = _fetch_rows_by_fuzzy_norm_pt(norm_pt, max_distance=dist_limit)
+    for row in rows:
+        append_candidate(
+            macua=str((row or {}).get("macua") or "").strip(),
+            source="db",
+            priority=int((row or {}).get("priority") or 1000),
+            word_class=str((row or {}).get("word_class") or "").strip(),
+        )
+
+    for c in info.get("candidates", []) or []:
+        append_candidate(c, "lookup", 5000)
+
     for pt_norm, macuas in lexicon_pt.items():
         is_match = pt_norm == norm_pt
         if fuzzy and not is_match:
@@ -262,18 +336,9 @@ def _collect_candidates_for_token(
         if not is_match:
             continue
         for macua in macuas:
-            s = str(macua).strip()
-            if s and s.lower() not in {v.lower() for v in candidates}:
-                candidates.append(s)
+            append_candidate(macua, "lexicon", 6000)
 
-    rows = _fetch_rows_by_norm_pt(norm_pt)
-    if fuzzy and not rows:
-        rows = _fetch_rows_by_fuzzy_norm_pt(norm_pt, max_distance=dist_limit)
-    for row in rows:
-        s = str((row or {}).get("macua") or "").strip()
-        if s and s.lower() not in {v.lower() for v in candidates}:
-            candidates.append(s)
-
+    candidates.sort(key=lambda c: (int(c.get("priority") or 1000), str(c.get("macua") or "").lower()))
     return candidates
 
 
@@ -289,9 +354,18 @@ def _collect_variants_for_word(word: str) -> Tuple[Dict[str, str], List[Dict[str
         grammar_profile=grammar_profile,
         fuzzy=True,
     )
-    pairs = [{"pt": word.strip(), "macua": c} for c in candidates]
+    pairs = [
+        {
+            "pt": word.strip(),
+            "macua": str(c.get("macua") or "").strip(),
+            "priority": int(c.get("priority") or idx + 1),
+            "word_class": str(c.get("word_class") or _classify_pt_token(word)),
+        }
+        for idx, c in enumerate(candidates)
+        if str(c.get("macua") or "").strip()
+    ]
 
-    deduped = _dedupe_pairs(pairs)
+    deduped = _dedupe_pairs(pairs)  # type: ignore[arg-type]
     principal = deduped[0] if deduped else {"pt": word.strip(), "macua": ""}
     return principal, deduped
 
@@ -339,7 +413,7 @@ def get_phrase_correction_payload(texto: str) -> Dict[str, Any]:
             continue
 
         pos_counter += 1
-        candidates = _collect_candidates_for_token(
+        candidate_objs = _collect_candidates_for_token(
             token,
             lexicon_pt,
             pronoun_pt,
@@ -347,6 +421,7 @@ def get_phrase_correction_payload(texto: str) -> Dict[str, Any]:
             grammar_profile=grammar_profile,
             fuzzy=False,
         )
+        candidates = [str(c.get("macua") or "").strip() for c in candidate_objs if str(c.get("macua") or "").strip()]
         selected = candidates[0] if candidates else token
         preferred = memory_map.get(pos_counter)
         if preferred:
@@ -364,12 +439,19 @@ def get_phrase_correction_payload(texto: str) -> Dict[str, Any]:
                 "pt": token,
                 "pontuacao": False,
                 "variantes": [
-                    {"macua": c, "selecionada": c == selected}
-                    for c in candidates
+                    {
+                        "macua": str(c.get("macua") or "").strip(),
+                        "selecionada": str(c.get("macua") or "").strip() == selected,
+                        "priority": int(c.get("priority") or 1000),
+                        "word_class": str(c.get("word_class") or _classify_pt_token(token)),
+                    }
+                    for c in candidate_objs
+                    if str(c.get("macua") or "").strip()
                 ]
                 if candidates
                 else [{"macua": token, "selecionada": True}],
                 "selecionada": selected,
+                "word_class": _classify_pt_token(token),
             }
         )
 
@@ -422,16 +504,19 @@ def save_phrase_learning(payload: Dict[str, Any]) -> Dict[str, Any]:
         visible_pos += 1
 
         all_variants: List[str] = []
+        ordered_variant_payloads: List[Dict[str, Any]] = []
         for v in variantes:
             if isinstance(v, dict):
                 val = str(v.get("macua") or "").strip()
+                ordered_variant_payloads.append(v)
             else:
                 val = str(v).strip()
+                ordered_variant_payloads.append({"macua": val})
             if val and val.lower() not in {x.lower() for x in all_variants}:
                 all_variants.append(val)
 
         if selected and selected.lower() not in {x.lower() for x in all_variants}:
-            all_variants.insert(0, selected)
+            all_variants.append(selected)
 
         if not selected:
             selected = all_variants[0] if all_variants else pt
@@ -439,8 +524,23 @@ def save_phrase_learning(payload: Dict[str, Any]) -> Dict[str, Any]:
 
         if all_variants:
             _sync_metadata_entry(pt, all_variants)
-            for macua in all_variants:
-                variants_to_upsert.append({"pt": pt, "macua": macua})
+            for idx, macua in enumerate(all_variants):
+                variant_payload = next(
+                    (
+                        item_v
+                        for item_v in ordered_variant_payloads
+                        if str((item_v or {}).get("macua") or "").strip().lower() == macua.lower()
+                    ),
+                    {},
+                )
+                variants_to_upsert.append(
+                    {
+                        "pt": pt,
+                        "macua": macua,
+                        "priority": idx + 1,
+                        "word_class": str(variant_payload.get("word_class") or _classify_pt_token(pt)),
+                    }
+                )
 
         phrase_rows.append(
             {
@@ -454,6 +554,7 @@ def save_phrase_learning(payload: Dict[str, Any]) -> Dict[str, Any]:
                 "phrase_length": len([p for p in ordered if not bool(p.get("pontuacao")) and not _is_punctuation(str(p.get("pt") or ""))]),
                 "metadata": {
                     "variantes": all_variants,
+                    "word_class": _classify_pt_token(pt),
                 },
             }
         )
@@ -517,18 +618,22 @@ def upsert_variants(variantes: List[Dict[str, str]]) -> Dict[str, Any]:
 
     rows = []
     touched_norm_pts = set()
-    for item in normalized:
+    for idx, item in enumerate(normalized):
         pt = item["pt"].strip()
         macua = item["macua"].strip()
         norm_pt = _normalize_pt(pt)
         norm_macua = _normalize_macua(macua)
         touched_norm_pts.add(norm_pt)
+        priority = int(item.get("priority") or idx + 1)
+        word_class = str(item.get("word_class") or _classify_pt_token(pt)).strip() or None
         rows.append(
             {
                 "pt": pt,
                 "macua": macua,
                 "normalized_pt": norm_pt,
                 "normalized_macua": norm_macua,
+                "priority": priority,
+                "word_class": word_class,
             }
         )
 

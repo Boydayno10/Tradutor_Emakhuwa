@@ -151,9 +151,9 @@ def get_pt_emakua_lexicon() -> Dict[str, Any]:
     try:
         variant_rows = _fetch_all_rows(
             VARIANTS_TABLE_NAME,
-            "pt,macua,normalized_pt,created_at,updated_at",
-            order_by="updated_at",
-            order_desc=True,
+            "pt,macua,normalized_pt,priority,created_at,updated_at",
+            order_by="priority",
+            order_desc=False,
         )
     except Exception:
         variant_rows = []
@@ -163,11 +163,12 @@ def get_pt_emakua_lexicon() -> Dict[str, Any]:
         variant_rows,
         key=lambda row: (
             str((row or {}).get("normalized_pt") or _normalize_text(str((row or {}).get("pt") or ""))),
+            int((row or {}).get("priority") or 1000),
             str((row or {}).get("updated_at") or ""),
             str((row or {}).get("created_at") or ""),
             str((row or {}).get("macua") or "").lower(),
         ),
-        reverse=True,
+        reverse=False,
     )
 
     # Preserve existing key casing where possible.
