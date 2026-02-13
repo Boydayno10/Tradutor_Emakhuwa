@@ -151,7 +151,7 @@ def get_pt_emakua_lexicon() -> Dict[str, Any]:
     try:
         variant_rows = _fetch_all_rows(
             VARIANTS_TABLE_NAME,
-            "pt,macua,normalized_pt,priority,created_at,updated_at",
+            "pt,macua,normalized_pt,priority,vote_score,votes_up,votes_down,created_at,updated_at",
             order_by="priority",
             order_desc=False,
         )
@@ -163,9 +163,10 @@ def get_pt_emakua_lexicon() -> Dict[str, Any]:
         variant_rows,
         key=lambda row: (
             str((row or {}).get("normalized_pt") or _normalize_text(str((row or {}).get("pt") or ""))),
+            -int((row or {}).get("vote_score") or 0),
             int((row or {}).get("priority") or 1000),
-            str((row or {}).get("updated_at") or ""),
-            str((row or {}).get("created_at") or ""),
+            -int((row or {}).get("votes_up") or 0),
+            int((row or {}).get("votes_down") or 0),
             str((row or {}).get("macua") or "").lower(),
         ),
         reverse=False,
@@ -173,6 +174,8 @@ def get_pt_emakua_lexicon() -> Dict[str, Any]:
 
     # Preserve existing key casing where possible.
     key_by_norm = {_normalize_text(k): k for k in normalized.keys()}
+    variants_by_norm: Dict[str, List[str]] = {}
+    first_pt_by_norm: Dict[str, str] = {}
     for row in variant_rows:
         pt = str((row or {}).get("pt") or "").strip()
         macua = str((row or {}).get("macua") or "").strip()
@@ -180,13 +183,33 @@ def get_pt_emakua_lexicon() -> Dict[str, Any]:
             continue
 
         norm_pt = _normalize_text(pt)
+        if norm_pt not in first_pt_by_norm:
+            first_pt_by_norm[norm_pt] = pt
+
+        bucket_by_norm = variants_by_norm.setdefault(norm_pt, [])
+        if not any(existing.lower() == macua.lower() for existing in bucket_by_norm):
+            bucket_by_norm.append(macua)
+
         target_key = key_by_norm.get(norm_pt, pt)
         if norm_pt not in key_by_norm:
             key_by_norm[norm_pt] = target_key
 
-        bucket = normalized.setdefault(target_key, [])
-        if not any(existing.lower() == macua.lower() for existing in bucket):
-            bucket.append(macua)
+    # Hybrid ordering rule:
+    # 1) Variants table order (priority/vote_score) first
+    # 2) Metadata leftovers after that (without duplicates)
+    for norm_pt, preferred_variants in variants_by_norm.items():
+        preferred_key = key_by_norm.get(norm_pt) or first_pt_by_norm.get(norm_pt) or norm_pt
+        key_by_norm[norm_pt] = preferred_key
+
+        current_values = normalized.get(preferred_key, [])
+        merged: List[str] = []
+        for item in preferred_variants:
+            if not any(x.lower() == item.lower() for x in merged):
+                merged.append(item)
+        for item in current_values:
+            if not any(x.lower() == str(item).lower() for x in merged):
+                merged.append(str(item))
+        normalized[preferred_key] = merged
 
     return normalized
 
