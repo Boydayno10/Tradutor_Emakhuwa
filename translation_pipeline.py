@@ -20,6 +20,75 @@ def _is_punctuation(tok: str) -> bool:
     return bool(re.fullmatch(r"[.,!?;:]+", tok))
 
 
+_OMIT_PT_TOKENS = {"o", "a", "os", "as", "da"}
+_POSSESSIVE_SUFFIX_BY_PRONOUN = {
+    # Regra 2 (adotado: sufixo "ka" para meu/minha)
+    "meu": "ka",
+    "minha": "ka",
+    "meus": "ka",
+    "minhas": "ka",
+    # Regra 3
+    "nosso": "hum",
+    "nossa": "hum",
+    "nossos": "hum",
+    "nossas": "hum",
+    # Regra 4
+    "seu": "nho",
+    "sua": "nho",
+    "seus": "nho",
+    "suas": "nho",
+    "teu": "nho",
+    "tua": "nho",
+    "teus": "nho",
+    "tuas": "nho",
+    # Regra 5
+    "vosso": "nhussa",
+    "vossa": "nhussa",
+    "vossos": "nhussa",
+    "vossas": "nhussa",
+}
+_PT_ADJECTIVE_HINTS = {
+    "bonito",
+    "bonita",
+    "bonitos",
+    "bonitas",
+    "caro",
+    "cara",
+    "caros",
+    "caras",
+    "grande",
+    "grandes",
+    "pequeno",
+    "pequena",
+    "pequenos",
+    "pequenas",
+    "novo",
+    "nova",
+    "novos",
+    "novas",
+    "velho",
+    "velha",
+    "velhos",
+    "velhas",
+    "bom",
+    "boa",
+    "bons",
+    "boas",
+    "mau",
+    "ma",
+    "maus",
+    "mas",
+    "lindo",
+    "linda",
+    "lindos",
+    "lindas",
+    "feio",
+    "feia",
+    "feios",
+    "feias",
+}
+
+
 """Pipeline de tradução Emakua
 
 Suporta dois sentidos:
@@ -265,6 +334,82 @@ def _tokenize(text: str) -> List[str]:
     return [t for t in text.split() if t]
 
 
+def _rebuild_sentence_from_tokens(tokens: List[str]) -> str:
+    sentence = " ".join(tokens)
+    return re.sub(r"\s+([.,!?;:])", r"\1", sentence)
+
+
+def _title_case_word(word: str) -> str:
+    if not word:
+        return word
+    return word[:1].upper() + word[1:].lower()
+
+
+def _normalize_list_case(words: List[str]) -> List[str]:
+    return [_title_case_word(w.strip()) for w in words if w and w.strip()]
+
+
+def _normalize_sentence_case(text: str) -> str:
+    tokens = _tokenize(text)
+    out: List[str] = []
+    seen_word = False
+    for tok in tokens:
+        if _is_punctuation(tok):
+            out.append(tok)
+            continue
+        if not seen_word:
+            out.append(_title_case_word(tok))
+            seen_word = True
+        else:
+            out.append(tok.lower())
+    return _rebuild_sentence_from_tokens(out)
+
+
+def _reorder_quality_pattern_pt(tokens: List[str]) -> List[str]:
+    """Regra 6: para padrão simples [adjetivo substantivo], reordena para substantivo + adjetivo."""
+    words = [t for t in tokens if not _is_punctuation(t)]
+    if len(words) != 2:
+        return tokens
+    first_norm = _normalize_pt(words[0])
+    second_norm = _normalize_pt(words[1])
+    if first_norm in _PT_ADJECTIVE_HINTS and second_norm not in _PT_ADJECTIVE_HINTS:
+        return [words[1], words[0]]
+    return tokens
+
+
+def _prepare_pt_tokens(tokens: List[str]) -> Tuple[List[str], Dict[int, str]]:
+    """Aplica regras de pré-processamento PT:
+    - remove artigos definidos e 'da'
+    - remove pronomes possessivos e marca sufixo para a próxima palavra de conteúdo
+    """
+    out_tokens: List[str] = []
+    suffix_by_word_pos: Dict[int, str] = {}
+    pending_suffix: Optional[str] = None
+    word_pos = 0
+
+    for tok in tokens:
+        if _is_punctuation(tok):
+            out_tokens.append(tok)
+            continue
+
+        norm = _normalize_pt(tok)
+        if norm in _OMIT_PT_TOKENS:
+            continue
+
+        suffix = _POSSESSIVE_SUFFIX_BY_PRONOUN.get(norm)
+        if suffix is not None:
+            pending_suffix = suffix
+            continue
+
+        out_tokens.append(tok)
+        word_pos += 1
+        if pending_suffix:
+            suffix_by_word_pos[word_pos] = pending_suffix
+            pending_suffix = None
+
+    return out_tokens, suffix_by_word_pos
+
+
 def _canonicalize_phrase_pt(text: str) -> str:
     tokens = _tokenize(text)
     out: List[str] = []
@@ -306,6 +451,7 @@ def _build_sentence_from_lookup(
     lexicon_em: Dict[str, List[str]],
     pronoun_em: Dict[str, List[str]],
     phrase_pt_preferences: Optional[Dict[int, str]] = None,
+    possessive_suffix_by_position: Optional[Dict[int, str]] = None,
 ) -> str:
     missing: List[str] = []
     out_tokens: List[str] = []
@@ -320,9 +466,8 @@ def _build_sentence_from_lookup(
 
         candidates = info["candidates"][:4]
         if candidates:
-            sentence = ", ".join(candidates)
-            if sentence:
-                sentence = sentence[0].upper() + sentence[1:]
+            # Regra 1 (lista): cada item inicia com maiúscula.
+            sentence = ", ".join(_normalize_list_case(candidates))
             return sentence
 
         # Sem candidatos conhecidos, devolve a própria palavra
@@ -356,19 +501,23 @@ def _build_sentence_from_lookup(
                             pronoun_pt,
                             spell_vocab_pt,
                         )
-                    out_tokens.append(selected or candidates[0])
+                    chosen = selected or candidates[0]
                 else:
-                    out_tokens.append(candidates[0])
+                    chosen = candidates[0]
             else:
-                out_tokens.append(candidates[0])
+                chosen = candidates[0]
+
+            if direction == "pt_to_em" and possessive_suffix_by_position:
+                suffix = possessive_suffix_by_position.get(word_position)
+                if suffix and not chosen.lower().endswith(suffix.lower()):
+                    chosen = f"{chosen}{suffix}"
+            out_tokens.append(chosen)
         else:
             out_tokens.append(tok)
 
-    sentence = " ".join(out_tokens)
-    sentence = re.sub(r"\s+([.,!?;:])", r"\1", sentence)
-    if sentence:
-        sentence = sentence[0].upper() + sentence[1:]
-    return sentence
+    sentence = _rebuild_sentence_from_tokens(out_tokens)
+    # Regra 1 (frase): só a primeira palavra em maiúscula.
+    return _normalize_sentence_case(sentence)
 
 
 def _count_known_tokens(
@@ -424,6 +573,8 @@ def translate_pt_to_em(text: str) -> str:
     lexicon_pt, pronoun_pt, spell_vocab_pt, lexicon_em, pronoun_em = _build_indexes(resources)
 
     tokens = _tokenize(text)
+    tokens = _reorder_quality_pattern_pt(tokens)
+    tokens, possessive_suffix_by_position = _prepare_pt_tokens(tokens)
     word_tokens = [t for t in tokens if not _is_punctuation(t)]
     phrase_preferences: Dict[int, str] = {}
     if len(word_tokens) > 1:
@@ -453,6 +604,7 @@ def translate_pt_to_em(text: str) -> str:
         lexicon_em,
         pronoun_em,
         phrase_pt_preferences=phrase_preferences,
+        possessive_suffix_by_position=possessive_suffix_by_position,
     )
 
 
@@ -497,6 +649,8 @@ def translate(text: str, direction: str = "auto") -> str:
     tokens = _tokenize(text)
 
     if direction == "pt_to_em":
+        tokens = _reorder_quality_pattern_pt(tokens)
+        tokens, possessive_suffix_by_position = _prepare_pt_tokens(tokens)
         word_tokens = [t for t in tokens if not _is_punctuation(t)]
         phrase_preferences: Dict[int, str] = {}
         if len(word_tokens) > 1:
@@ -525,6 +679,7 @@ def translate(text: str, direction: str = "auto") -> str:
             lexicon_em,
             pronoun_em,
             phrase_pt_preferences=phrase_preferences,
+            possessive_suffix_by_position=possessive_suffix_by_position,
         )
     if direction == "em_to_pt":
         return _build_sentence_from_lookup(
@@ -539,6 +694,10 @@ def translate(text: str, direction: str = "auto") -> str:
 
     auto_dir = _detect_direction(tokens, lexicon_pt, pronoun_pt, lexicon_em, pronoun_em)
     phrase_preferences: Dict[int, str] = {}
+    possessive_suffix_by_position: Dict[int, str] = {}
+    if auto_dir == "pt_to_em":
+        tokens = _reorder_quality_pattern_pt(tokens)
+        tokens, possessive_suffix_by_position = _prepare_pt_tokens(tokens)
     word_tokens = [t for t in tokens if not _is_punctuation(t)]
     if auto_dir == "pt_to_em" and len(word_tokens) > 1:
         canonical = _canonicalize_phrase_pt(text)
@@ -567,4 +726,5 @@ def translate(text: str, direction: str = "auto") -> str:
         lexicon_em,
         pronoun_em,
         phrase_pt_preferences=phrase_preferences,
+        possessive_suffix_by_position=possessive_suffix_by_position,
     )
