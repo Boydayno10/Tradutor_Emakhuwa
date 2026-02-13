@@ -1,5 +1,5 @@
 import os
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from openai import OpenAI
 
@@ -57,7 +57,7 @@ def _get_client() -> OpenAI:
 def analyze_linguistic_intent(
     text: str,
     question: str = "",
-    model: str | None = None,
+    model: Optional[str] = None,
 ) -> Dict[str, Any]:
     source = (text or "").strip()
     if not source:
@@ -87,4 +87,3 @@ def analyze_linguistic_intent(
         "question": scoped_question,
         "analysis": output_text,
     }
-
