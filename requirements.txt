@@ -2,3 +2,4 @@ flask
 supabase
 gunicorn
 openai
+pypdf

@@ -11,7 +11,9 @@ from correction_service import (
     upsert_variants,
 )
 from linguistic_analyzer import analyze_linguistic_intent
+from pdf_training_pipeline import build_training_artifacts
 from supabase_client_strict import get_client
+from training_knowledge_loader import clear_training_knowledge_cache, load_training_knowledge
 from translation_pipeline import translate
 
 app = Flask(__name__)
@@ -128,6 +130,43 @@ def linguistic_analyze_route():
             model=model or None,
         )
         return jsonify(payload)
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/training/status", methods=["GET"])
+def training_status_route():
+    data = load_training_knowledge()
+    if not data:
+        return jsonify({"status": "empty", "message": "Treino PDF ainda nao gerado"}), 200
+    return jsonify(
+        {
+            "status": "ok",
+            "sentence_count": data.get("sentence_count", 0),
+            "token_count": data.get("token_count", 0),
+            "unique_token_count": data.get("unique_token_count", 0),
+            "pdfs": data.get("pdfs", []),
+        }
+    )
+
+
+@app.route("/api/training/rebuild", methods=["POST"])
+def training_rebuild_route():
+    _, auth_error = _require_authorized_profile()
+    if auth_error:
+        return auth_error
+    try:
+        payload = build_training_artifacts()
+        clear_training_knowledge_cache()
+        return jsonify(
+            {
+                "status": "ok",
+                "sentence_count": payload.get("sentence_count", 0),
+                "token_count": payload.get("token_count", 0),
+                "unique_token_count": payload.get("unique_token_count", 0),
+                "pdfs": payload.get("pdfs", []),
+            }
+        )
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
 

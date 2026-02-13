@@ -1,0 +1,1271 @@
+{
+  "source": "pdf_training_pipeline",
+  "source_dir": "D:\\Muthola Solution LDA\\tradutor_emakuwa\\Servidor\\Arquivos de treinamento",
+  "pdfs": [
+    {
+      "file": "EntryFileDownload.pdf",
+      "pages": 397,
+      "chars": 851257
+    },
+    {
+      "file": "vmw_MukhuwaVocabulary_p000565.pdf",
+      "pages": 110,
+      "chars": 66409
+    }
+  ],
+  "sentence_count": 40661,
+  "token_count": 128252,
+  "unique_token_count": 37054,
+  "top_tokens": [
+    {
+      "token": "s",
+      "count": 3908
+    },
+    {
+      "token": "v",
+      "count": 3538
+    },
+    {
+      "token": "m",
+      "count": 2364
+    },
+    {
+      "token": "tr",
+      "count": 2219
+    },
+    {
+      "token": "f",
+      "count": 2008
+    },
+    {
+      "token": "adj",
+      "count": 1461
+    },
+    {
+      "token": "i",
+      "count": 1435
+    },
+    {
+      "token": "de",
+      "count": 1388
+    },
+    {
+      "token": "a",
+      "count": 1272
+    },
+    {
+      "token": "ou",
+      "count": 1097
+    },
+    {
+      "token": "e",
+      "count": 916
+    },
+    {
+      "token": "o",
+      "count": 768
+    },
+    {
+      "token": "pl",
+      "count": 645
+    },
+    {
+      "token": "do",
+      "count": 596
+    },
+    {
+      "token": "refl",
+      "count": 542
+    },
+    {
+      "token": "na",
+      "count": 529
+    },
+    {
+      "token": "wa",
+      "count": 509
+    },
+    {
+      "token": "se",
+      "count": 492
+    },
+    {
+      "token": "mu",
+      "count": 487
+    },
+    {
+      "token": "ni",
+      "count": 440
+    },
+    {
+      "token": "mulipa",
+      "count": 325
+    },
+    {
+      "token": "ma",
+      "count": 321
+    },
+    {
+      "token": "no",
+      "count": 310
+    },
+    {
+      "token": "etc",
+      "count": 278
+    },
+    {
+      "token": "lom",
+      "count": 277
+    },
+    {
+      "token": "em",
+      "count": 267
+    },
+    {
+      "token": "va",
+      "count": 267
+    },
+    {
+      "token": "com",
+      "count": 264
+    },
+    {
+      "token": "para",
+      "count": 257
+    },
+    {
+      "token": "que",
+      "count": 254
+    },
+    {
+      "token": "da",
+      "count": 251
+    },
+    {
+      "token": "por",
+      "count": 248
+    },
+    {
+      "token": "l",
+      "count": 240
+    },
+    {
+      "token": "la",
+      "count": 239
+    },
+    {
+      "token": "h",
+      "count": 224
+    },
+    {
+      "token": "mo",
+      "count": 219
+    },
+    {
+      "token": "j",
+      "count": 206
+    },
+    {
+      "token": "murrima",
+      "count": 198
+    },
+    {
+      "token": "adv",
+      "count": 197
+    },
+    {
+      "token": "fazer",
+      "count": 191
+    },
+    {
+      "token": "ir",
+      "count": 188
+    },
+    {
+      "token": "marr",
+      "count": 171
+    },
+    {
+      "token": "wo",
+      "count": 170
+    },
+    {
+      "token": "meto",
+      "count": 163
+    },
+    {
+      "token": "port",
+      "count": 162
+    },
+    {
+      "token": "os",
+      "count": 152
+    },
+    {
+      "token": "ka",
+      "count": 152
+    },
+    {
+      "token": "or",
+      "count": 151
+    },
+    {
+      "token": "uma",
+      "count": 150
+    },
+    {
+      "token": "ha",
+      "count": 150
+    },
+    {
+      "token": "sa",
+      "count": 150
+    },
+    {
+      "token": "wi",
+      "count": 148
+    },
+    {
+      "token": "t",
+      "count": 145
+    },
+    {
+      "token": "ohi",
+      "count": 144
+    },
+    {
+      "token": "as",
+      "count": 142
+    },
+    {
+      "token": "vo",
+      "count": 141
+    },
+    {
+      "token": "pa",
+      "count": 136
+    },
+    {
+      "token": "um",
+      "count": 135
+    },
+    {
+      "token": "ohela",
+      "count": 134
+    },
+    {
+      "token": "ra",
+      "count": 134
+    },
+    {
+      "token": "r",
+      "count": 133
+    },
+    {
+      "token": "muteko",
+      "count": 125
+    },
+    {
+      "token": "ao",
+      "count": 124
+    },
+    {
+      "token": "ya",
+      "count": 124
+    },
+    {
+      "token": "okhala",
+      "count": 121
+    },
+    {
+      "token": "wira",
+      "count": 120
+    },
+    {
+      "token": "mutthu",
+      "count": 120
+    },
+    {
+      "token": "nao",
+      "count": 116
+    },
+    {
+      "token": "etthu",
+      "count": 110
+    },
+    {
+      "token": "mwa",
+      "count": 105
+    },
+    {
+      "token": "chir",
+      "count": 104
+    },
+    {
+      "token": "ovaha",
+      "count": 102
+    },
+    {
+      "token": "mur",
+      "count": 95
+    },
+    {
+      "token": "ser",
+      "count": 94
+    },
+    {
+      "token": "y",
+      "count": 91
+    },
+    {
+      "token": "n",
+      "count": 90
+    },
+    {
+      "token": "dar",
+      "count": 90
+    },
+    {
+      "token": "mais",
+      "count": 89
+    },
+    {
+      "token": "agua",
+      "count": 85
+    },
+    {
+      "token": "lo",
+      "count": 83
+    },
+    {
+      "token": "sem",
+      "count": 81
+    },
+    {
+      "token": "tho",
+      "count": 80
+    },
+    {
+      "token": "pe",
+      "count": 80
+    },
+    {
+      "token": "ota",
+      "count": 80
+    },
+    {
+      "token": "das",
+      "count": 78
+    },
+    {
+      "token": "wu",
+      "count": 78
+    },
+    {
+      "token": "so",
+      "count": 77
+    },
+    {
+      "token": "ter",
+      "count": 77
+    },
+    {
+      "token": "lela",
+      "count": 77
+    },
+    {
+      "token": "nha",
+      "count": 76
+    },
+    {
+      "token": "vide",
+      "count": 76
+    },
+    {
+      "token": "mwana",
+      "count": 75
+    },
+    {
+      "token": "muluku",
+      "count": 74
+    },
+    {
+      "token": "nihiku",
+      "count": 73
+    },
+    {
+      "token": "dos",
+      "count": 72
+    },
+    {
+      "token": "si",
+      "count": 71
+    },
+    {
+      "token": "num",
+      "count": 71
+    },
+    {
+      "token": "ko",
+      "count": 71
+    },
+    {
+      "token": "opa",
+      "count": 71
+    },
+    {
+      "token": "tta",
+      "count": 71
+    },
+    {
+      "token": "elapo",
+      "count": 71
+    },
+    {
+      "token": "w",
+      "count": 70
+    },
+    {
+      "token": "ohiya",
+      "count": 70
+    },
+    {
+      "token": "vathi",
+      "count": 68
+    },
+    {
+      "token": "we",
+      "count": 68
+    },
+    {
+      "token": "c",
+      "count": 67
+    },
+    {
+      "token": "atthu",
+      "count": 67
+    },
+    {
+      "token": "ola",
+      "count": 66
+    },
+    {
+      "token": "wopa",
+      "count": 66
+    },
+    {
+      "token": "ru",
+      "count": 65
+    },
+    {
+      "token": "muloko",
+      "count": 64
+    },
+    {
+      "token": "como",
+      "count": 63
+    },
+    {
+      "token": "wona",
+      "count": 63
+    },
+    {
+      "token": "sha",
+      "count": 61
+    },
+    {
+      "token": "okhu",
+      "count": 61
+    },
+    {
+      "token": "sana",
+      "count": 61
+    },
+    {
+      "token": "mi",
+      "count": 60
+    },
+    {
+      "token": "liha",
+      "count": 60
+    },
+    {
+      "token": "rima",
+      "count": 60
+    },
+    {
+      "token": "grande",
+      "count": 59
+    },
+    {
+      "token": "nanano",
+      "count": 59
+    },
+    {
+      "token": "fa",
+      "count": 58
+    },
+    {
+      "token": "liwa",
+      "count": 58
+    },
+    {
+      "token": "oha",
+      "count": 58
+    },
+    {
+      "token": "ta",
+      "count": 57
+    },
+    {
+      "token": "ovara",
+      "count": 57
+    },
+    {
+      "token": "ca",
+      "count": 56
+    },
+    {
+      "token": "yo",
+      "count": 56
+    },
+    {
+      "token": "pron",
+      "count": 56
+    },
+    {
+      "token": "ova",
+      "count": 56
+    },
+    {
+      "token": "oka",
+      "count": 56
+    },
+    {
+      "token": "rya",
+      "count": 56
+    },
+    {
+      "token": "ri",
+      "count": 55
+    },
+    {
+      "token": "p",
+      "count": 55
+    },
+    {
+      "token": "casa",
+      "count": 55
+    },
+    {
+      "token": "otthuna",
+      "count": 55
+    },
+    {
+      "token": "orruma",
+      "count": 55
+    },
+    {
+      "token": "otthu",
+      "count": 55
+    },
+    {
+      "token": "orrera",
+      "count": 54
+    },
+    {
+      "token": "to",
+      "count": 54
+    },
+    {
+      "token": "wetta",
+      "count": 54
+    },
+    {
+      "token": "tem",
+      "count": 53
+    },
+    {
+      "token": "gram",
+      "count": 53
+    },
+    {
+      "token": "murru",
+      "count": 53
+    },
+    {
+      "token": "lipa",
+      "count": 53
+    },
+    {
+      "token": "okumiha",
+      "count": 52
+    },
+    {
+      "token": "oku",
+      "count": 52
+    },
+    {
+      "token": "otthuka",
+      "count": 52
+    },
+    {
+      "token": "owa",
+      "count": 52
+    },
+    {
+      "token": "lugar",
+      "count": 52
+    },
+    {
+      "token": "fogo",
+      "count": 52
+    },
+    {
+      "token": "olipiha",
+      "count": 52
+    },
+    {
+      "token": "loc",
+      "count": 51
+    },
+    {
+      "token": "ro",
+      "count": 51
+    },
+    {
+      "token": "me",
+      "count": 50
+    },
+    {
+      "token": "po",
+      "count": 50
+    },
+    {
+      "token": "kela",
+      "count": 50
+    },
+    {
+      "token": "ne",
+      "count": 50
+    },
+    {
+      "token": "ti",
+      "count": 50
+    },
+    {
+      "token": "onanara",
+      "count": 49
+    },
+    {
+      "token": "owerya",
+      "count": 49
+    },
+    {
+      "token": "kha",
+      "count": 49
+    },
+    {
+      "token": "nsuwa",
+      "count": 49
+    },
+    {
+      "token": "li",
+      "count": 48
+    },
+    {
+      "token": "mas",
+      "count": 48
+    },
+    {
+      "token": "muito",
+      "count": 48
+    },
+    {
+      "token": "pessoa",
+      "count": 48
+    },
+    {
+      "token": "thanu",
+      "count": 48
+    },
+    {
+      "token": "u",
+      "count": 47
+    },
+    {
+      "token": "nos",
+      "count": 46
+    },
+    {
+      "token": "ori",
+      "count": 46
+    },
+    {
+      "token": "orrowa",
+      "count": 46
+    },
+    {
+      "token": "tirar",
+      "count": 46
+    },
+    {
+      "token": "okho",
+      "count": 46
+    },
+    {
+      "token": "mulupale",
+      "count": 46
+    },
+    {
+      "token": "ole",
+      "count": 45
+    },
+    {
+      "token": "oko",
+      "count": 45
+    },
+    {
+      "token": "okha",
+      "count": 45
+    },
+    {
+      "token": "masi",
+      "count": 45
+    },
+    {
+      "token": "mal",
+      "count": 44
+    },
+    {
+      "token": "kula",
+      "count": 44
+    },
+    {
+      "token": "oja",
+      "count": 44
+    },
+    {
+      "token": "ekhotto",
+      "count": 44
+    },
+    {
+      "token": "okhuma",
+      "count": 44
+    },
+    {
+      "token": "vakhani",
+      "count": 44
+    },
+    {
+      "token": "pela",
+      "count": 43
+    },
+    {
+      "token": "omala",
+      "count": 43
+    },
+    {
+      "token": "wova",
+      "count": 43
+    },
+    {
+      "token": "tca",
+      "count": 43
+    },
+    {
+      "token": "owoka",
+      "count": 43
+    },
+    {
+      "token": "owo",
+      "count": 43
+    },
+    {
+      "token": "ohelela",
+      "count": 43
+    },
+    {
+      "token": "miruku",
+      "count": 43
+    },
+    {
+      "token": "ku",
+      "count": 42
+    },
+    {
+      "token": "ar",
+      "count": 42
+    },
+    {
+      "token": "oho",
+      "count": 42
+    },
+    {
+      "token": "ovo",
+      "count": 42
+    },
+    {
+      "token": "mloko",
+      "count": 42
+    },
+    {
+      "token": "sol",
+      "count": 42
+    },
+    {
+      "token": "le",
+      "count": 41
+    },
+    {
+      "token": "wupuwela",
+      "count": 41
+    },
+    {
+      "token": "ohonona",
+      "count": 41
+    },
+    {
+      "token": "ottuli",
+      "count": 41
+    },
+    {
+      "token": "bem",
+      "count": 40
+    },
+    {
+      "token": "ohala",
+      "count": 40
+    },
+    {
+      "token": "ove",
+      "count": 40
+    },
+    {
+      "token": "oleva",
+      "count": 40
+    },
+    {
+      "token": "oli",
+      "count": 40
+    },
+    {
+      "token": "ophwanha",
+      "count": 40
+    },
+    {
+      "token": "mahiku",
+      "count": 40
+    },
+    {
+      "token": "okathi",
+      "count": 40
+    },
+    {
+      "token": "olamula",
+      "count": 40
+    },
+    {
+      "token": "olavula",
+      "count": 40
+    },
+    {
+      "token": "ohimya",
+      "count": 40
+    },
+    {
+      "token": "owera",
+      "count": 40
+    },
+    {
+      "token": "miloko",
+      "count": 40
+    },
+    {
+      "token": "re",
+      "count": 39
+    },
+    {
+      "token": "tto",
+      "count": 39
+    },
+    {
+      "token": "ona",
+      "count": 39
+    },
+    {
+      "token": "som",
+      "count": 38
+    },
+    {
+      "token": "oteka",
+      "count": 38
+    },
+    {
+      "token": "okhalana",
+      "count": 38
+    },
+    {
+      "token": "olha",
+      "count": 38
+    },
+    {
+      "token": "owali",
+      "count": 38
+    },
+    {
+      "token": "eka",
+      "count": 38
+    },
+    {
+      "token": "orru",
+      "count": 38
+    },
+    {
+      "token": "pelo",
+      "count": 37
+    },
+    {
+      "token": "sobre",
+      "count": 37
+    },
+    {
+      "token": "es",
+      "count": 37
+    },
+    {
+      "token": "card",
+      "count": 37
+    },
+    {
+      "token": "tha",
+      "count": 37
+    },
+    {
+      "token": "olepa",
+      "count": 37
+    },
+    {
+      "token": "coti",
+      "count": 37
+    },
+    {
+      "token": "estar",
+      "count": 36
+    },
+    {
+      "token": "palavras",
+      "count": 36
+    },
+    {
+      "token": "des",
+      "count": 36
+    },
+    {
+      "token": "k",
+      "count": 36
+    },
+    {
+      "token": "ver",
+      "count": 36
+    },
+    {
+      "token": "pag",
+      "count": 36
+    },
+    {
+      "token": "ovi",
+      "count": 36
+    },
+    {
+      "token": "dia",
+      "count": 36
+    },
+    {
+      "token": "ikharari",
+      "count": 36
+    },
+    {
+      "token": "ikuru",
+      "count": 36
+    },
+    {
+      "token": "lingua",
+      "count": 35
+    },
+    {
+      "token": "vela",
+      "count": 35
+    },
+    {
+      "token": "ela",
+      "count": 35
+    },
+    {
+      "token": "othe",
+      "count": 35
+    },
+    {
+      "token": "cf",
+      "count": 35
+    },
+    {
+      "token": "thi",
+      "count": 35
+    },
+    {
+      "token": "onanariha",
+      "count": 35
+    },
+    {
+      "token": "parte",
+      "count": 35
+    },
+    {
+      "token": "itthu",
+      "count": 35
+    },
+    {
+      "token": "otha",
+      "count": 34
+    },
+    {
+      "token": "omaka",
+      "count": 34
+    },
+    {
+      "token": "omana",
+      "count": 34
+    },
+    {
+      "token": "olela",
+      "count": 34
+    },
+    {
+      "token": "onho",
+      "count": 34
+    },
+    {
+      "token": "mulolo",
+      "count": 34
+    },
+    {
+      "token": "nsina",
+      "count": 34
+    },
+    {
+      "token": "ohina",
+      "count": 34
+    },
+    {
+      "token": "nipurro",
+      "count": 34
+    },
+    {
+      "token": "otaphula",
+      "count": 34
+    },
+    {
+      "token": "entre",
+      "count": 33
+    },
+    {
+      "token": "mesmo",
+      "count": 33
+    },
+    {
+      "token": "omaliha",
+      "count": 33
+    },
+    {
+      "token": "mula",
+      "count": 33
+    },
+    {
+      "token": "oholo",
+      "count": 33
+    },
+    {
+      "token": "mwi",
+      "count": 33
+    },
+    {
+      "token": "woniha",
+      "count": 33
+    },
+    {
+      "token": "vara",
+      "count": 33
+    },
+    {
+      "token": "nome",
+      "count": 32
+    },
+    {
+      "token": "homem",
+      "count": 32
+    },
+    {
+      "token": "vano",
+      "count": 32
+    },
+    {
+      "token": "mao",
+      "count": 32
+    },
+    {
+      "token": "prep",
+      "count": 32
+    },
+    {
+      "token": "ovukula",
+      "count": 32
+    },
+    {
+      "token": "ovu",
+      "count": 32
+    },
+    {
+      "token": "mulher",
+      "count": 32
+    },
+    {
+      "token": "owi",
+      "count": 32
+    },
+    {
+      "token": "ankhili",
+      "count": 32
+    },
+    {
+      "token": "opaka",
+      "count": 32
+    },
+    {
+      "token": "depois",
+      "count": 31
+    },
+    {
+      "token": "co",
+      "count": 31
+    },
+    {
+      "token": "comida",
+      "count": 31
+    },
+    {
+      "token": "onhonhiwa",
+      "count": 31
+    },
+    {
+      "token": "ficar",
+      "count": 31
+    },
+    {
+      "token": "owe",
+      "count": 31
+    },
+    {
+      "token": "osuka",
+      "count": 31
+    },
+    {
+      "token": "pano",
+      "count": 31
+    },
+    {
+      "token": "wiya",
+      "count": 31
+    },
+    {
+      "token": "dentes",
+      "count": 31
+    },
+    {
+      "token": "fora",
+      "count": 31
+    },
+    {
+      "token": "tempo",
+      "count": 31
+    },
+    {
+      "token": "rio",
+      "count": 31
+    },
+    {
+      "token": "dois",
+      "count": 30
+    },
+    {
+      "token": "yolha",
+      "count": 30
+    },
+    {
+      "token": "wela",
+      "count": 30
+    },
+    {
+      "token": "yoja",
+      "count": 30
+    },
+    {
+      "token": "ovikana",
+      "count": 30
+    },
+    {
+      "token": "olo",
+      "count": 30
+    }
+  ],
+  "rule_markers": {
+    "possessive_pronouns": [
+      "meu",
+      "minha",
+      "meus",
+      "nosso",
+      "nossa",
+      "seu",
+      "sua",
+      "teu",
+      "tua",
+      "vosso",
+      "vossa"
+    ],
+    "articles": [
+      "o",
+      "a",
+      "os",
+      "as"
+    ],
+    "prepositions": [
+      "da",
+      "de",
+      "do",
+      "dos",
+      "das",
+      "em",
+      "no",
+      "na"
+    ],
+    "question_markers": [
+      "quem",
+      "que",
+      "qual",
+      "quais",
+      "quando",
+      "onde",
+      "como",
+      "porque"
+    ],
+    "quality_markers": [
+      "bonito",
+      "caro",
+      "cara",
+      "grande",
+      "pequeno",
+      "novo",
+      "velho"
+    ]
+  }
+}

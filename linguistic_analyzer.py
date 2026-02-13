@@ -2,6 +2,7 @@ import os
 from typing import Any, Dict, Optional
 
 from openai import OpenAI
+from training_knowledge_loader import load_training_knowledge
 
 
 SYSTEM_INSTRUCTIONS = """
@@ -64,7 +65,18 @@ def analyze_linguistic_intent(
         raise RuntimeError("Campo 'text' vazio")
 
     scoped_question = (question or "").strip()
+    knowledge = load_training_knowledge()
+    markers = knowledge.get("rule_markers", {}) if isinstance(knowledge, dict) else {}
+    marker_context = ""
+    if isinstance(markers, dict) and markers:
+        marker_context = (
+            "\nMARCADORES_LINGUISTICOS_TREINADOS:\n"
+            + str(markers)
+        )
+
     user_input = source if not scoped_question else f"TEXTO: {source}\nPERGUNTA: {scoped_question}"
+    if marker_context:
+        user_input = f"{user_input}{marker_context}"
     chosen_model = (model or os.environ.get("OPENAI_ANALYZER_MODEL") or "gpt-5-nano").strip()
 
     client = _get_client()
