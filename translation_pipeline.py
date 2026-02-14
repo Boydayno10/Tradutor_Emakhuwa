@@ -116,6 +116,7 @@ _PT_EXCLAMATION_HINTS = {
     "otimo",
     "excelente",
 }
+_POSSESSIVE_LIST_TRIGGER_PRONOUNS = {"meu", "minha", "meus", "minhas"}
 
 
 def _dedupe_keep_order(items: List[str]) -> List[str]:
@@ -680,6 +681,42 @@ def _prepare_pt_tokens(tokens: List[str]) -> Tuple[List[str], Dict[int, str]]:
     return out_tokens, suffix_by_word_pos
 
 
+def _extract_possessive_list_parts_pt(text: str) -> Optional[List[str]]:
+    """Detecta listas PT com possessivo + virgulas + conector final (e/e o/e a/e os/e as)."""
+    source = re.sub(r"\s+", " ", (text or "").strip())
+    if not source or "," not in source:
+        return None
+
+    norm_source = _normalize_pt(source)
+    has_trigger_pronoun = any(
+        re.search(rf"\b{pron}\b", norm_source)
+        for pron in _POSSESSIVE_LIST_TRIGGER_PRONOUNS
+    )
+    if not has_trigger_pronoun:
+        return None
+
+    # Divide em "cabeca, penultimo + conector + ultimo".
+    match = re.match(
+        r"^(?P<head>.+),(?P<before_last>[^,]+?)\s+e(?:\s+(?:o|a|os|as))?\s+(?P<last>[^,]+)\s*$",
+        source,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return None
+
+    head = str(match.group("head") or "").strip()
+    before_last = str(match.group("before_last") or "").strip()
+    last = str(match.group("last") or "").strip()
+    if not head or not before_last or not last:
+        return None
+
+    head_items = [part.strip() for part in head.split(",") if part.strip()]
+    if not head_items:
+        return None
+
+    return head_items + [before_last, last]
+
+
 def _canonicalize_phrase_pt(text: str) -> str:
     tokens = _tokenize(text)
     out: List[str] = []
@@ -690,6 +727,99 @@ def _canonicalize_phrase_pt(text: str) -> str:
             out.append(_normalize_pt(tok))
     phrase = " ".join(out)
     return re.sub(r"\s+([.,!?;:])", r"\1", phrase)
+
+
+def _translate_pt_to_em_with_indexes(
+    text: str,
+    lexicon_pt: Dict[str, List[str]],
+    pronoun_pt: Dict[str, List[str]],
+    spell_vocab_pt: Dict[str, str],
+    lexicon_em: Dict[str, List[str]],
+    pronoun_em: Dict[str, List[str]],
+    grammar_profile: Dict[str, Any],
+    apply_phrase_policy: bool = True,
+) -> str:
+    tokens = _tokenize(text)
+    tokens = _reorder_quality_pattern_pt(tokens)
+    tokens, possessive_suffix_by_position = _prepare_pt_tokens(tokens)
+    word_tokens = [t for t in tokens if not _is_punctuation(t)]
+    phrase_preferences: Dict[int, str] = {}
+    if len(word_tokens) > 1:
+        canonical = _canonicalize_phrase_pt(text)
+        rows = get_phrase_memory_preferences(canonical)
+        learned_words = [
+            str((row or {}).get("selected_macua") or "").strip()
+            for row in rows
+        ]
+        if len(learned_words) == len(word_tokens) and all(learned_words):
+            sentence = _build_sentence_from_memory_words(tokens, learned_words)
+            return (
+                _apply_phrase_punctuation_policy(text, sentence)
+                if apply_phrase_policy
+                else sentence
+            )
+        for row in rows:
+            try:
+                pos = int(row.get("position_index") or 0)
+            except Exception:
+                pos = 0
+            selected = str(row.get("selected_macua") or "").strip()
+            if pos > 0 and selected:
+                phrase_preferences[pos] = selected
+
+    sentence = _build_sentence_from_lookup(
+        tokens,
+        "pt_to_em",
+        lexicon_pt,
+        pronoun_pt,
+        spell_vocab_pt,
+        lexicon_em,
+        pronoun_em,
+        grammar_profile,
+        phrase_pt_preferences=phrase_preferences,
+        possessive_suffix_by_position=possessive_suffix_by_position,
+    )
+    if apply_phrase_policy:
+        return _apply_phrase_punctuation_policy(text, sentence)
+    return sentence
+
+
+def _translate_possessive_list_with_ni(
+    text: str,
+    lexicon_pt: Dict[str, List[str]],
+    pronoun_pt: Dict[str, List[str]],
+    spell_vocab_pt: Dict[str, str],
+    lexicon_em: Dict[str, List[str]],
+    pronoun_em: Dict[str, List[str]],
+    grammar_profile: Dict[str, Any],
+) -> Optional[str]:
+    parts = _extract_possessive_list_parts_pt(text)
+    if not parts:
+        return None
+
+    translated_parts: List[str] = []
+    for part in parts:
+        translated = _translate_pt_to_em_with_indexes(
+            part,
+            lexicon_pt,
+            pronoun_pt,
+            spell_vocab_pt,
+            lexicon_em,
+            pronoun_em,
+            grammar_profile,
+            apply_phrase_policy=False,
+        ).strip()
+        cleaned = re.sub(r"\s+([.,!?;:])", r"\1", translated)
+        cleaned = cleaned.strip(" \t\r\n.,!?;:")
+        if not cleaned:
+            return None
+        translated_parts.append(cleaned.lower())
+
+    if len(translated_parts) < 2:
+        return None
+    if len(translated_parts) == 2:
+        return f"{translated_parts[0]} ni {translated_parts[1]}"
+    return f"{', '.join(translated_parts[:-1])} ni {translated_parts[-1]}"
 
 
 def _build_sentence_from_memory_words(tokens: List[str], selected_words: List[str]) -> str:
@@ -877,43 +1007,28 @@ def translate_pt_to_em(text: str) -> str:
     resources = load_resources()
     lexicon_pt, pronoun_pt, spell_vocab_pt, lexicon_em, pronoun_em, grammar_profile = _build_indexes(resources)
 
-    tokens = _tokenize(text)
-    tokens = _reorder_quality_pattern_pt(tokens)
-    tokens, possessive_suffix_by_position = _prepare_pt_tokens(tokens)
-    word_tokens = [t for t in tokens if not _is_punctuation(t)]
-    phrase_preferences: Dict[int, str] = {}
-    if len(word_tokens) > 1:
-        canonical = _canonicalize_phrase_pt(text)
-        rows = get_phrase_memory_preferences(canonical)
-        learned_words = [
-            str((row or {}).get("selected_macua") or "").strip()
-            for row in rows
-        ]
-        if len(learned_words) == len(word_tokens) and all(learned_words):
-            sentence = _build_sentence_from_memory_words(tokens, learned_words)
-            return _apply_phrase_punctuation_policy(text, sentence)
-        for row in rows:
-            try:
-                pos = int(row.get("position_index") or 0)
-            except Exception:
-                pos = 0
-            selected = str(row.get("selected_macua") or "").strip()
-            if pos > 0 and selected:
-                phrase_preferences[pos] = selected
-
-    sentence = _build_sentence_from_lookup(
-        tokens,
-        "pt_to_em",
+    special_list = _translate_possessive_list_with_ni(
+        text,
         lexicon_pt,
         pronoun_pt,
         spell_vocab_pt,
         lexicon_em,
         pronoun_em,
         grammar_profile,
-        phrase_pt_preferences=phrase_preferences,
-        possessive_suffix_by_position=possessive_suffix_by_position,
     )
-    return _apply_phrase_punctuation_policy(text, sentence)
+    if special_list is not None:
+        return special_list
+
+    return _translate_pt_to_em_with_indexes(
+        text,
+        lexicon_pt,
+        pronoun_pt,
+        spell_vocab_pt,
+        lexicon_em,
+        pronoun_em,
+        grammar_profile,
+        apply_phrase_policy=True,
+    )
 
 
 def translate_em_to_pt(text: str) -> str:
@@ -959,41 +1074,27 @@ def translate(text: str, direction: str = "auto") -> str:
     tokens = _tokenize(text)
 
     if direction == "pt_to_em":
-        tokens = _reorder_quality_pattern_pt(tokens)
-        tokens, possessive_suffix_by_position = _prepare_pt_tokens(tokens)
-        word_tokens = [t for t in tokens if not _is_punctuation(t)]
-        phrase_preferences: Dict[int, str] = {}
-        if len(word_tokens) > 1:
-            canonical = _canonicalize_phrase_pt(text)
-            rows = get_phrase_memory_preferences(canonical)
-            learned_words = [
-                str((row or {}).get("selected_macua") or "").strip()
-                for row in rows
-            ]
-            if len(learned_words) == len(word_tokens) and all(learned_words):
-                sentence = _build_sentence_from_memory_words(tokens, learned_words)
-                return _apply_phrase_punctuation_policy(text, sentence)
-            for row in rows:
-                try:
-                    pos = int(row.get("position_index") or 0)
-                except Exception:
-                    pos = 0
-                selected = str(row.get("selected_macua") or "").strip()
-                if pos > 0 and selected:
-                    phrase_preferences[pos] = selected
-        sentence = _build_sentence_from_lookup(
-            tokens,
-            "pt_to_em",
+        special_list = _translate_possessive_list_with_ni(
+            text,
             lexicon_pt,
             pronoun_pt,
             spell_vocab_pt,
             lexicon_em,
             pronoun_em,
             grammar_profile,
-            phrase_pt_preferences=phrase_preferences,
-            possessive_suffix_by_position=possessive_suffix_by_position,
         )
-        return _apply_phrase_punctuation_policy(text, sentence)
+        if special_list is not None:
+            return special_list
+        return _translate_pt_to_em_with_indexes(
+            text,
+            lexicon_pt,
+            pronoun_pt,
+            spell_vocab_pt,
+            lexicon_em,
+            pronoun_em,
+            grammar_profile,
+            apply_phrase_policy=True,
+        )
     if direction == "em_to_pt":
         sentence = _build_sentence_from_lookup(
             tokens,
@@ -1011,27 +1112,27 @@ def translate(text: str, direction: str = "auto") -> str:
     phrase_preferences: Dict[int, str] = {}
     possessive_suffix_by_position: Dict[int, str] = {}
     if auto_dir == "pt_to_em":
-        tokens = _reorder_quality_pattern_pt(tokens)
-        tokens, possessive_suffix_by_position = _prepare_pt_tokens(tokens)
-    word_tokens = [t for t in tokens if not _is_punctuation(t)]
-    if auto_dir == "pt_to_em" and len(word_tokens) > 1:
-        canonical = _canonicalize_phrase_pt(text)
-        rows = get_phrase_memory_preferences(canonical)
-        learned_words = [
-            str((row or {}).get("selected_macua") or "").strip()
-            for row in rows
-        ]
-        if len(learned_words) == len(word_tokens) and all(learned_words):
-            sentence = _build_sentence_from_memory_words(tokens, learned_words)
-            return _apply_phrase_punctuation_policy(text, sentence)
-        for row in rows:
-            try:
-                pos = int(row.get("position_index") or 0)
-            except Exception:
-                pos = 0
-            selected = str(row.get("selected_macua") or "").strip()
-            if pos > 0 and selected:
-                phrase_preferences[pos] = selected
+        special_list = _translate_possessive_list_with_ni(
+            text,
+            lexicon_pt,
+            pronoun_pt,
+            spell_vocab_pt,
+            lexicon_em,
+            pronoun_em,
+            grammar_profile,
+        )
+        if special_list is not None:
+            return special_list
+        return _translate_pt_to_em_with_indexes(
+            text,
+            lexicon_pt,
+            pronoun_pt,
+            spell_vocab_pt,
+            lexicon_em,
+            pronoun_em,
+            grammar_profile,
+            apply_phrase_policy=True,
+        )
 
     sentence = _build_sentence_from_lookup(
         tokens,
