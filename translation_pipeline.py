@@ -21,7 +21,6 @@ def _is_punctuation(tok: str) -> bool:
 
 
 _OMIT_PT_TOKENS = {"o", "a", "os", "as", "da"}
-_CONNECTOR_PT_TOKENS = {"e"}
 _POSSESSIVE_SUFFIX_BY_PRONOUN = {
     # Regra 2 (adotado: sufixo "ka" para meu/minha)
     "meu": "ka",
@@ -628,8 +627,6 @@ def _prepare_pt_tokens(tokens: List[str]) -> Tuple[List[str], Dict[int, str]]:
         norm = _normalize_pt(tok)
         if norm in _OMIT_PT_TOKENS:
             continue
-        if norm in _CONNECTOR_PT_TOKENS:
-            continue
         if norm in _POSSESSIVE_SUFFIX_BY_PRONOUN:
             continue
         filtered_word_norms.append(norm)
@@ -643,14 +640,6 @@ def _prepare_pt_tokens(tokens: List[str]) -> Tuple[List[str], Dict[int, str]]:
 
         norm = _normalize_pt(tok)
         if norm in _OMIT_PT_TOKENS:
-            continue
-        if norm in _CONNECTOR_PT_TOKENS:
-            # Em frases normais, o conector "e" nao deve vazar para "ni".
-            # Se for entrada isolada (ex.: "e"), mantemos para traducao direta.
-            if not has_content_words:
-                out_tokens.append(tok)
-                word_pos += 1
-                kept_word_index += 1
             continue
 
         suffix = _POSSESSIVE_SUFFIX_BY_PRONOUN.get(norm)
@@ -693,9 +682,9 @@ def _prepare_pt_tokens(tokens: List[str]) -> Tuple[List[str], Dict[int, str]]:
 
 
 def _extract_possessive_list_parts_pt(text: str) -> Optional[List[str]]:
-    """Detecta listas PT com possessivo e conector final para conversao em 'ni'."""
+    """Detecta listas PT com possessivo + virgulas + conector final (e/e o/e a/e os/e as)."""
     source = re.sub(r"\s+", " ", (text or "").strip())
-    if not source:
+    if not source or "," not in source:
         return None
 
     norm_source = _normalize_pt(source)
@@ -706,41 +695,26 @@ def _extract_possessive_list_parts_pt(text: str) -> Optional[List[str]]:
     if not has_trigger_pronoun:
         return None
 
-    # Procura o ultimo conector final: e / e o / e a / e os / e as.
-    final_match = None
-    for m in re.finditer(
-        r"\s+e(?:\s+(?:o|a|os|as))?\s+",
+    # Divide em "cabeca, penultimo + conector + ultimo".
+    match = re.match(
+        r"^(?P<head>.+),(?P<before_last>[^,]+?)\s+e(?:\s+(?:o|a|os|as))?\s+(?P<last>[^,]+)\s*$",
         source,
         flags=re.IGNORECASE,
-    ):
-        final_match = m
-    if final_match is None:
+    )
+    if not match:
         return None
 
-    left = source[: final_match.start()].strip()
-    last = source[final_match.end() :].strip()
-    if not left or not last:
+    head = str(match.group("head") or "").strip()
+    before_last = str(match.group("before_last") or "").strip()
+    last = str(match.group("last") or "").strip()
+    if not head or not before_last or not last:
         return None
 
-    # Permite listas separadas por virgula, ponto, ponto-e-virgula ou dois pontos.
-    left_items = [part.strip() for part in re.split(r"\s*[,.;:]\s*", left) if part.strip()]
-    if not left_items:
+    head_items = [part.strip() for part in head.split(",") if part.strip()]
+    if not head_items:
         return None
 
-    parts = left_items + [last]
-    if len(parts) < 2:
-        return None
-
-    # Evita ativar em frases narrativas: exige possessivo em pelo menos 2 itens.
-    possessive_items = 0
-    for item in parts:
-        norm_item = _normalize_pt(item)
-        if any(re.search(rf"\b{pron}\b", norm_item) for pron in _POSSESSIVE_LIST_TRIGGER_PRONOUNS):
-            possessive_items += 1
-    if possessive_items < 2:
-        return None
-
-    return parts
+    return head_items + [before_last, last]
 
 
 def _canonicalize_phrase_pt(text: str) -> str:
