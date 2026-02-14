@@ -183,8 +183,8 @@ def get_pt_emakua_lexicon() -> Dict[str, Any]:
         variant_rows,
         key=lambda row: (
             str((row or {}).get("normalized_pt") or _normalize_text(str((row or {}).get("pt") or ""))),
-            -int((row or {}).get("vote_score") or 0),
             int((row or {}).get("priority") or 1000),
+            -int((row or {}).get("vote_score") or 0),
             -int((row or {}).get("votes_up") or 0),
             int((row or {}).get("votes_down") or 0),
             str((row or {}).get("macua") or "").lower(),
@@ -263,6 +263,11 @@ def load_resources() -> EmakuaResources:
 def get_client() -> Client:
     """Exposes the shared Supabase client for server-side service modules."""
     return _client
+
+
+def clear_resource_cache() -> None:
+    """Clears in-memory resource cache so latest DB updates are visible immediately."""
+    _resource_cache.clear()
 
 
 def get_phrase_memory_preferences(normalized_source_phrase: str) -> List[Dict[str, Any]]:

@@ -21,6 +21,7 @@ def _is_punctuation(tok: str) -> bool:
 
 
 _OMIT_PT_TOKENS = {"o", "a", "os", "as", "da"}
+_CONNECTOR_PT_TOKENS = {"e"}
 _POSSESSIVE_SUFFIX_BY_PRONOUN = {
     # Regra 2 (adotado: sufixo "ka" para meu/minha)
     "meu": "ka",
@@ -117,6 +118,7 @@ _PT_EXCLAMATION_HINTS = {
     "excelente",
 }
 _POSSESSIVE_LIST_TRIGGER_PRONOUNS = {"meu", "minha", "meus", "minhas"}
+_COPULA_PT_TOKENS = {"e"}
 
 
 def _dedupe_keep_order(items: List[str]) -> List[str]:
@@ -654,7 +656,10 @@ def _prepare_pt_tokens(tokens: List[str]) -> Tuple[List[str], Dict[int, str]]:
             # Posposicao: "carro meu" -> sufixo no substantivo anterior.
             if word_pos > 0 and kept_word_index >= 1:
                 prev_norm = filtered_word_norms[kept_word_index - 1]
-                if prev_norm not in _PT_ADJECTIVE_HINTS:
+                if (
+                    prev_norm not in _PT_ADJECTIVE_HINTS
+                    and prev_norm not in _CONNECTOR_PT_TOKENS
+                ):
                     suffix_by_word_pos[word_pos] = suffix
                     pending_suffix = None
                     continue
@@ -742,6 +747,51 @@ def _extract_possessive_comma_list_parts_pt(text: str) -> Optional[List[str]]:
             return None
 
     return parts
+
+
+def _strip_pt_copula(text: str) -> str:
+    tokens = _tokenize(text or "")
+    kept: List[str] = []
+    for tok in tokens:
+        if _is_punctuation(tok):
+            kept.append(tok)
+            continue
+        if _normalize_pt(tok) in _COPULA_PT_TOKENS:
+            continue
+        kept.append(tok)
+    return _rebuild_sentence_from_tokens(kept).strip()
+
+
+def _is_quality_clause_pt(text: str) -> bool:
+    tokens = [t for t in _tokenize(text or "") if not _is_punctuation(t)]
+    if len(tokens) < 2:
+        return False
+    normalized = [_normalize_pt(t) for t in tokens]
+    has_copula = any(tok in _COPULA_PT_TOKENS for tok in normalized)
+    if not has_copula:
+        return False
+    # Heuristica simples: ultima palavra da clausula costuma ser adjetivo.
+    if normalized[-1] in _PT_ADJECTIVE_HINTS:
+        return True
+    return False
+
+
+def _extract_quality_pair_parts_pt(text: str) -> Optional[Tuple[str, str]]:
+    source = re.sub(r"\s+", " ", (text or "").strip())
+    if not source:
+        return None
+
+    # Conector de juncao entre clausulas: e / e o / e a / e os / e as
+    connector_match = None
+    for m in re.finditer(r"\s+e(?:\s+(?:o|a|os|as))?\s+", source, flags=re.IGNORECASE):
+        left = source[: m.start()].strip()
+        right = source[m.end() :].strip()
+        if not left or not right:
+            continue
+        if _is_quality_clause_pt(left) and _is_quality_clause_pt(right):
+            connector_match = (left, right)
+            break
+    return connector_match
 
 
 def _canonicalize_phrase_pt(text: str) -> str:
@@ -885,6 +935,56 @@ def _translate_possessive_comma_list(
     return ", ".join(translated_parts)
 
 
+def _translate_quality_pair_with_ni(
+    text: str,
+    lexicon_pt: Dict[str, List[str]],
+    pronoun_pt: Dict[str, List[str]],
+    spell_vocab_pt: Dict[str, str],
+    lexicon_em: Dict[str, List[str]],
+    pronoun_em: Dict[str, List[str]],
+    grammar_profile: Dict[str, Any],
+) -> Optional[str]:
+    pair = _extract_quality_pair_parts_pt(text)
+    if not pair:
+        return None
+    left_raw, right_raw = pair
+    # Mantem copula dentro de cada clausula para permitir regra "e/é -> tiyo"
+    # quando estiver caracterizando substantivo.
+    left = left_raw
+    right = right_raw
+    if not left or not right:
+        return None
+
+    left_t = _translate_pt_to_em_with_indexes(
+        left,
+        lexicon_pt,
+        pronoun_pt,
+        spell_vocab_pt,
+        lexicon_em,
+        pronoun_em,
+        grammar_profile,
+        apply_phrase_policy=False,
+    ).strip()
+    right_t = _translate_pt_to_em_with_indexes(
+        right,
+        lexicon_pt,
+        pronoun_pt,
+        spell_vocab_pt,
+        lexicon_em,
+        pronoun_em,
+        grammar_profile,
+        apply_phrase_policy=False,
+    ).strip()
+    if not left_t or not right_t:
+        return None
+
+    left_clean = re.sub(r"\s+([.,!?;:])", r"\1", left_t).strip(" \t\r\n.,!?;:").lower()
+    right_clean = re.sub(r"\s+([.,!?;:])", r"\1", right_t).strip(" \t\r\n.,!?;:").lower()
+    if not left_clean or not right_clean:
+        return None
+    return f"{left_clean} ni {right_clean}"
+
+
 def _build_sentence_from_memory_words(tokens: List[str], selected_words: List[str]) -> str:
     """Builds sentence preserving punctuation slots, using learned word order."""
 
@@ -973,6 +1073,7 @@ def _build_sentence_from_lookup(
                 next_norm = _normalize_pt(tokens[j])
                 break
             if next_norm in _PT_ADJECTIVE_HINTS:
+                out_tokens.append("tiyo")
                 continue
 
         word_position += 1
@@ -1083,6 +1184,21 @@ def translate_pt_to_em(text: str) -> str:
     lexicon_pt, pronoun_pt, spell_vocab_pt, lexicon_em, pronoun_em, grammar_profile = _build_indexes(resources)
 
     try:
+        quality_pair = _translate_quality_pair_with_ni(
+            text,
+            lexicon_pt,
+            pronoun_pt,
+            spell_vocab_pt,
+            lexicon_em,
+            pronoun_em,
+            grammar_profile,
+        )
+    except Exception:
+        quality_pair = None
+    if quality_pair is not None:
+        return _apply_phrase_punctuation_policy(text, quality_pair)
+
+    try:
         special_list = _translate_possessive_list_with_ni(
             text,
             lexicon_pt,
@@ -1167,6 +1283,20 @@ def translate(text: str, direction: str = "auto") -> str:
 
     if direction == "pt_to_em":
         try:
+            quality_pair = _translate_quality_pair_with_ni(
+                text,
+                lexicon_pt,
+                pronoun_pt,
+                spell_vocab_pt,
+                lexicon_em,
+                pronoun_em,
+                grammar_profile,
+            )
+        except Exception:
+            quality_pair = None
+        if quality_pair is not None:
+            return _apply_phrase_punctuation_policy(text, quality_pair)
+        try:
             special_list = _translate_possessive_list_with_ni(
                 text,
                 lexicon_pt,
@@ -1221,6 +1351,20 @@ def translate(text: str, direction: str = "auto") -> str:
     phrase_preferences: Dict[int, str] = {}
     possessive_suffix_by_position: Dict[int, str] = {}
     if auto_dir == "pt_to_em":
+        try:
+            quality_pair = _translate_quality_pair_with_ni(
+                text,
+                lexicon_pt,
+                pronoun_pt,
+                spell_vocab_pt,
+                lexicon_em,
+                pronoun_em,
+                grammar_profile,
+            )
+        except Exception:
+            quality_pair = None
+        if quality_pair is not None:
+            return _apply_phrase_punctuation_policy(text, quality_pair)
         try:
             special_list = _translate_possessive_list_with_ni(
                 text,

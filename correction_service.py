@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
 
-from supabase_client_strict import VARIANTS_TABLE_NAME, get_client
+from supabase_client_strict import VARIANTS_TABLE_NAME, clear_resource_cache, get_client
 from translation_pipeline import (
     _build_indexes,
     _is_punctuation,
@@ -670,6 +670,8 @@ def upsert_variants(variantes: List[Dict[str, str]]) -> Dict[str, Any]:
     for payload in grouped.values():
         _sync_metadata_entry(payload["pt"], payload["macuas"])
 
+    clear_resource_cache()
+
     first_word = normalized[0]["pt"]
     principal, variants = _collect_variants_for_word(first_word)
     return {
@@ -693,6 +695,7 @@ def delete_variant(pt: str, macua: str) -> int:
     )
     data = getattr(resp, "data", None) or []
     _remove_metadata_variant(pt, macua)
+    clear_resource_cache()
     return len(data)
 
 
@@ -708,4 +711,5 @@ def delete_entry(pt: str) -> int:
     )
     data = getattr(resp, "data", None) or []
     _remove_metadata_entry(pt)
+    clear_resource_cache()
     return len(data)
