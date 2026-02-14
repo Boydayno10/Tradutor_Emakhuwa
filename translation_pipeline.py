@@ -900,6 +900,11 @@ def _build_sentence_from_lookup(
             out_tokens.append(tok)
             continue
 
+        if direction == "pt_to_em" and _normalize_pt(tok) == "e" and len(tokens) > 1:
+            # "ni" deve surgir apenas na regra especial de lista; em frase normal
+            # ignoramos o conector "e" para nao aparecer entre duas palavras.
+            continue
+
         word_position += 1
         if direction == "pt_to_em":
             info = lookup_pt_to_em(
