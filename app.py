@@ -16,7 +16,7 @@ from pdf_training_pipeline import build_training_artifacts
 from supabase_client_strict import get_client
 from training_knowledge_loader import clear_training_knowledge_cache, load_training_knowledge
 from translation_pipeline import translate
-from vote_service import register_translation_vote
+from vote_service import VoteCooldownError, register_translation_vote
 
 app = Flask(__name__)
 
@@ -168,6 +168,17 @@ def feedback_vote_route():
             vote=vote,
         )
         return jsonify(payload)
+    except VoteCooldownError as exc:
+        return (
+            jsonify(
+                {
+                    "error": str(exc),
+                    "retry_after_seconds": int(exc.retry_after_seconds),
+                    "next_allowed_at": exc.next_allowed_at,
+                }
+            ),
+            429,
+        )
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
 

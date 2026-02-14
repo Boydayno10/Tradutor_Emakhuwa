@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 from supabase import Client, create_client
+from supabase.lib.client_options import SyncClientOptions
 
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
@@ -23,7 +24,25 @@ PHRASE_MEMORY_TABLE_NAME = os.environ.get(
 if not SUPABASE_URL or not SUPABASE_KEY:
     raise RuntimeError("SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY/ANON_KEY precisam estar definidos no ambiente.")
 
-_client: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+_POSTGREST_TIMEOUT_SECONDS = float(
+    os.environ.get("SUPABASE_POSTGREST_TIMEOUT_SECONDS", "25")
+)
+_STORAGE_TIMEOUT_SECONDS = int(
+    os.environ.get("SUPABASE_STORAGE_TIMEOUT_SECONDS", "20")
+)
+_FUNCTION_TIMEOUT_SECONDS = int(
+    os.environ.get("SUPABASE_FUNCTION_TIMEOUT_SECONDS", "10")
+)
+
+_client: Client = create_client(
+    SUPABASE_URL,
+    SUPABASE_KEY,
+    options=SyncClientOptions(
+        postgrest_client_timeout=_POSTGREST_TIMEOUT_SECONDS,
+        storage_client_timeout=_STORAGE_TIMEOUT_SECONDS,
+        function_client_timeout=_FUNCTION_TIMEOUT_SECONDS,
+    ),
+)
 
 
 @dataclass
@@ -38,7 +57,7 @@ class EmakuaResources:
 # Por padrão usamos 0 para garantir que **toda** requisição consulte
 # diretamente o Supabase, sem reutilizar dados em cache.
 # Se quiser habilitar cache, defina EMAKUA_CACHE_TTL_SECONDS>0.
-_CACHE_TTL_SECONDS: int = int(os.environ.get("EMAKUA_CACHE_TTL_SECONDS", "0"))
+_CACHE_TTL_SECONDS: int = int(os.environ.get("EMAKUA_CACHE_TTL_SECONDS", "120"))
 
 # Cache em memória separado por recurso: nome -> (timestamp, dados)
 _resource_cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}

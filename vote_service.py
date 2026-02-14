@@ -15,6 +15,13 @@ COOLDOWN_TABLE = "emakua_vote_cooldowns"
 _COOLDOWN_MINUTES_STEPS = [21, 45, 70, 120, 180, 240, 360, 480, 720, 1440]
 
 
+class VoteCooldownError(RuntimeError):
+    def __init__(self, message: str, retry_after_seconds: int, next_allowed_at: str = ""):
+        super().__init__(message)
+        self.retry_after_seconds = max(1, int(retry_after_seconds))
+        self.next_allowed_at = str(next_allowed_at or "")
+
+
 def _normalize(text: str) -> str:
     value = (text or "").strip().lower()
     value = unicodedata.normalize("NFD", value)
@@ -92,8 +99,14 @@ def _check_and_advance_cooldown(user_id: str, source_text: str) -> Dict[str, Any
             next_allowed = None
         if next_allowed is not None and next_allowed > now:
             remaining = int((next_allowed - now).total_seconds())
-            raise RuntimeError(
-                f"Para evitar abusos, voce so pode votar novamente nesta mesma traducao daqui a {_format_wait_delta(remaining)}."
+            message = (
+                "Para evitar abusos, você só pode votar novamente "
+                f"nesta mesma tradução daqui a {_format_wait_delta(remaining)}."
+            )
+            raise VoteCooldownError(
+                message=message,
+                retry_after_seconds=remaining,
+                next_allowed_at=next_allowed.isoformat(),
             )
 
     new_count = current_count + 1
