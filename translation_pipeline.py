@@ -717,6 +717,33 @@ def _extract_possessive_list_parts_pt(text: str) -> Optional[List[str]]:
     return head_items + [before_last, last]
 
 
+def _extract_possessive_comma_list_parts_pt(text: str) -> Optional[List[str]]:
+    """Detecta lista possessiva separada por virgula, sem conector final."""
+    source = re.sub(r"\s+", " ", (text or "").strip())
+    if not source or "," not in source:
+        return None
+
+    # Se existe conector final, a regra de "ni" deve tratar.
+    if re.search(r"\s+e(?:\s+(?:o|a|os|as))?\s+", source, flags=re.IGNORECASE):
+        return None
+
+    parts = [part.strip() for part in source.split(",") if part.strip()]
+    if len(parts) < 2:
+        return None
+
+    # Ativa so quando todos os itens forem possessivos alvo.
+    for item in parts:
+        norm_item = _normalize_pt(item)
+        has_pron = any(
+            re.search(rf"\b{pron}\b", norm_item)
+            for pron in _POSSESSIVE_LIST_TRIGGER_PRONOUNS
+        )
+        if not has_pron:
+            return None
+
+    return parts
+
+
 def _canonicalize_phrase_pt(text: str) -> str:
     tokens = _tokenize(text)
     out: List[str] = []
@@ -820,6 +847,42 @@ def _translate_possessive_list_with_ni(
     if len(translated_parts) == 2:
         return f"{translated_parts[0]} ni {translated_parts[1]}"
     return f"{', '.join(translated_parts[:-1])} ni {translated_parts[-1]}"
+
+
+def _translate_possessive_comma_list(
+    text: str,
+    lexicon_pt: Dict[str, List[str]],
+    pronoun_pt: Dict[str, List[str]],
+    spell_vocab_pt: Dict[str, str],
+    lexicon_em: Dict[str, List[str]],
+    pronoun_em: Dict[str, List[str]],
+    grammar_profile: Dict[str, Any],
+) -> Optional[str]:
+    parts = _extract_possessive_comma_list_parts_pt(text)
+    if not parts:
+        return None
+
+    translated_parts: List[str] = []
+    for part in parts:
+        translated = _translate_pt_to_em_with_indexes(
+            part,
+            lexicon_pt,
+            pronoun_pt,
+            spell_vocab_pt,
+            lexicon_em,
+            pronoun_em,
+            grammar_profile,
+            apply_phrase_policy=False,
+        ).strip()
+        cleaned = re.sub(r"\s+([.,!?;:])", r"\1", translated)
+        cleaned = cleaned.strip(" \t\r\n.,!?;:")
+        if not cleaned:
+            return None
+        translated_parts.append(cleaned.lower())
+
+    if len(translated_parts) < 2:
+        return None
+    return ", ".join(translated_parts)
 
 
 def _build_sentence_from_memory_words(tokens: List[str], selected_words: List[str]) -> str:
@@ -1030,6 +1093,17 @@ def translate_pt_to_em(text: str) -> str:
     )
     if special_list is not None:
         return special_list
+    special_comma_list = _translate_possessive_comma_list(
+        text,
+        lexicon_pt,
+        pronoun_pt,
+        spell_vocab_pt,
+        lexicon_em,
+        pronoun_em,
+        grammar_profile,
+    )
+    if special_comma_list is not None:
+        return special_comma_list
 
     return _translate_pt_to_em_with_indexes(
         text,
@@ -1097,6 +1171,17 @@ def translate(text: str, direction: str = "auto") -> str:
         )
         if special_list is not None:
             return special_list
+        special_comma_list = _translate_possessive_comma_list(
+            text,
+            lexicon_pt,
+            pronoun_pt,
+            spell_vocab_pt,
+            lexicon_em,
+            pronoun_em,
+            grammar_profile,
+        )
+        if special_comma_list is not None:
+            return special_comma_list
         return _translate_pt_to_em_with_indexes(
             text,
             lexicon_pt,
@@ -1135,6 +1220,17 @@ def translate(text: str, direction: str = "auto") -> str:
         )
         if special_list is not None:
             return special_list
+        special_comma_list = _translate_possessive_comma_list(
+            text,
+            lexicon_pt,
+            pronoun_pt,
+            spell_vocab_pt,
+            lexicon_em,
+            pronoun_em,
+            grammar_profile,
+        )
+        if special_comma_list is not None:
+            return special_comma_list
         return _translate_pt_to_em_with_indexes(
             text,
             lexicon_pt,
