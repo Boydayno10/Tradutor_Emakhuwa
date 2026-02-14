@@ -22,6 +22,8 @@ def _is_punctuation(tok: str) -> bool:
 
 _OMIT_PT_TOKENS = {"o", "a", "os", "as", "da"}
 _CONNECTOR_PT_TOKENS = {"e"}
+# Regra de demonstrativo no inicio da frase.
+# Pessoas/animais: esse->owo, essa->ola
 _DEMONSTRATIVE_SUFFIX_BY_TOKEN = {
     "esse": "owo",
     "essa": "ola",
@@ -175,6 +177,17 @@ _PT_PERSON_ANIMAL_HINTS = {
     "cabra",
     "galinha",
     "peixe",
+}
+# Regra de demonstrativo para objetos especificos (sufixo "eyo").
+# Para ajustar/remover, editar apenas este conjunto.
+_PT_OBJECT_DEMONSTRATIVE_EYO_HINTS = {
+    "mesa",
+    "casa",
+    "estrada",
+    "estarada",
+    "enxada",
+    "enchada",
+    "quintal",
 }
 
 
@@ -677,7 +690,7 @@ def _prepare_pt_tokens(tokens: List[str]) -> Tuple[List[str], Dict[int, str]]:
     out_tokens: List[str] = []
     suffix_by_word_pos: Dict[int, str] = {}
     pending_suffix: Optional[str] = None
-    pending_demo_suffix: Optional[str] = None
+    pending_demo_token_norm: Optional[str] = None
     word_pos = 0
     first_word_norm: Optional[str] = None
 
@@ -710,14 +723,13 @@ def _prepare_pt_tokens(tokens: List[str]) -> Tuple[List[str], Dict[int, str]]:
         if first_word_norm is None:
             first_word_norm = norm
 
-        demo_suffix = _DEMONSTRATIVE_SUFFIX_BY_TOKEN.get(norm)
         if (
-            demo_suffix is not None
+            norm in _DEMONSTRATIVE_SUFFIX_BY_TOKEN
             and first_word_norm == norm
             and word_pos == 0
-            and pending_demo_suffix is None
+            and pending_demo_token_norm is None
         ):
-            pending_demo_suffix = demo_suffix
+            pending_demo_token_norm = norm
             continue
 
         suffix = _POSSESSIVE_SUFFIX_BY_PRONOUN.get(norm)
@@ -747,19 +759,23 @@ def _prepare_pt_tokens(tokens: List[str]) -> Tuple[List[str], Dict[int, str]]:
         word_pos += 1
         kept_word_index += 1
 
-        if pending_demo_suffix:
-            # Regra nova: "esse/essa" no inicio da frase aplica sufixo apenas
-            # para pessoas/animais (nao objetos).
+        if pending_demo_token_norm:
+            # Regra demonstrativa no inicio da frase:
+            # pessoa/animal -> owo/ola; objetos mapeados -> eyo.
             if norm in _PT_ADJECTIVE_HINTS:
                 continue
-            if norm in _PT_PERSON_ANIMAL_HINTS:
+            demo_suffix = _demonstrative_suffix_for_target(
+                pending_demo_token_norm,
+                norm,
+            )
+            if demo_suffix:
                 existing = suffix_by_word_pos.get(word_pos, "")
-                if pending_demo_suffix not in existing:
-                    suffix_by_word_pos[word_pos] = f"{existing}{pending_demo_suffix}"
-                pending_demo_suffix = None
+                if demo_suffix not in existing:
+                    suffix_by_word_pos[word_pos] = f"{existing}{demo_suffix}"
+                pending_demo_token_norm = None
             else:
-                # Proximo termo nao e pessoa/animal: nao aplica.
-                pending_demo_suffix = None
+                # Proximo termo sem regra: nao aplica sufixo demonstrativo.
+                pending_demo_token_norm = None
 
         if pending_suffix:
             # Se vier adjetivo apos possessivo (ex.: "meu lindo carro"),
@@ -870,6 +886,16 @@ def _copula_translation_for_context(prev_norm: str) -> str:
     if prev_norm in _PT_LIVING_HINTS:
         return "to"
     return "tiyo"
+
+
+def _demonstrative_suffix_for_target(demo_token_norm: str, target_norm: str) -> str:
+    # Regra: para pessoa/animal usa sufixo por genero do demonstrativo;
+    # para objetos mapeados usa "eyo".
+    if target_norm in _PT_PERSON_ANIMAL_HINTS:
+        return _DEMONSTRATIVE_SUFFIX_BY_TOKEN.get(demo_token_norm, "")
+    if target_norm in _PT_OBJECT_DEMONSTRATIVE_EYO_HINTS:
+        return "eyo"
+    return ""
 
 
 def _extract_quality_pair_parts_pt(text: str) -> Optional[Tuple[str, str]]:
