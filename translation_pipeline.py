@@ -895,15 +895,22 @@ def _build_sentence_from_lookup(
         # Sem candidatos conhecidos, devolve a prÃ³pria palavra
         return tok
     word_position = 0
-    for tok in tokens:
+    for idx, tok in enumerate(tokens):
         if _is_punctuation(tok):
             out_tokens.append(tok)
             continue
 
         if direction == "pt_to_em" and _normalize_pt(tok) == "e" and len(tokens) > 1:
-            # "ni" deve surgir apenas na regra especial de lista; em frase normal
-            # ignoramos o conector "e" para nao aparecer entre duas palavras.
-            continue
+            # Em padrao de elogio/atribuicao ("X e bonito"), nao gerar "ni".
+            # Em mencao/lista ("carro e galinha"), mantemos o conector.
+            next_norm = ""
+            for j in range(idx + 1, len(tokens)):
+                if _is_punctuation(tokens[j]):
+                    continue
+                next_norm = _normalize_pt(tokens[j])
+                break
+            if next_norm in _PT_ADJECTIVE_HINTS:
+                continue
 
         word_position += 1
         if direction == "pt_to_em":
