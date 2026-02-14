@@ -693,9 +693,9 @@ def _prepare_pt_tokens(tokens: List[str]) -> Tuple[List[str], Dict[int, str]]:
 
 
 def _extract_possessive_list_parts_pt(text: str) -> Optional[List[str]]:
-    """Detecta listas PT com possessivo + virgulas + conector final (e/e o/e a/e os/e as)."""
+    """Detecta listas PT com possessivo e conector final para conversao em 'ni'."""
     source = re.sub(r"\s+", " ", (text or "").strip())
-    if not source or "," not in source:
+    if not source:
         return None
 
     norm_source = _normalize_pt(source)
@@ -706,26 +706,41 @@ def _extract_possessive_list_parts_pt(text: str) -> Optional[List[str]]:
     if not has_trigger_pronoun:
         return None
 
-    # Divide em "cabeca, penultimo + conector + ultimo".
-    match = re.match(
-        r"^(?P<head>.+),(?P<before_last>[^,]+?)\s+e(?:\s+(?:o|a|os|as))?\s+(?P<last>[^,]+)\s*$",
+    # Procura o ultimo conector final: e / e o / e a / e os / e as.
+    final_match = None
+    for m in re.finditer(
+        r"\s+e(?:\s+(?:o|a|os|as))?\s+",
         source,
         flags=re.IGNORECASE,
-    )
-    if not match:
+    ):
+        final_match = m
+    if final_match is None:
         return None
 
-    head = str(match.group("head") or "").strip()
-    before_last = str(match.group("before_last") or "").strip()
-    last = str(match.group("last") or "").strip()
-    if not head or not before_last or not last:
+    left = source[: final_match.start()].strip()
+    last = source[final_match.end() :].strip()
+    if not left or not last:
         return None
 
-    head_items = [part.strip() for part in head.split(",") if part.strip()]
-    if not head_items:
+    # Permite listas separadas por virgula, ponto, ponto-e-virgula ou dois pontos.
+    left_items = [part.strip() for part in re.split(r"\s*[,.;:]\s*", left) if part.strip()]
+    if not left_items:
         return None
 
-    return head_items + [before_last, last]
+    parts = left_items + [last]
+    if len(parts) < 2:
+        return None
+
+    # Evita ativar em frases narrativas: exige possessivo em pelo menos 2 itens.
+    possessive_items = 0
+    for item in parts:
+        norm_item = _normalize_pt(item)
+        if any(re.search(rf"\b{pron}\b", norm_item) for pron in _POSSESSIVE_LIST_TRIGGER_PRONOUNS):
+            possessive_items += 1
+    if possessive_items < 2:
+        return None
+
+    return parts
 
 
 def _canonicalize_phrase_pt(text: str) -> str:
