@@ -21,6 +21,7 @@ def _is_punctuation(tok: str) -> bool:
 
 
 _OMIT_PT_TOKENS = {"o", "a", "os", "as", "da"}
+_CONNECTOR_PT_TOKENS = {"e"}
 _POSSESSIVE_SUFFIX_BY_PRONOUN = {
     # Regra 2 (adotado: sufixo "ka" para meu/minha)
     "meu": "ka",
@@ -627,6 +628,8 @@ def _prepare_pt_tokens(tokens: List[str]) -> Tuple[List[str], Dict[int, str]]:
         norm = _normalize_pt(tok)
         if norm in _OMIT_PT_TOKENS:
             continue
+        if norm in _CONNECTOR_PT_TOKENS:
+            continue
         if norm in _POSSESSIVE_SUFFIX_BY_PRONOUN:
             continue
         filtered_word_norms.append(norm)
@@ -640,6 +643,14 @@ def _prepare_pt_tokens(tokens: List[str]) -> Tuple[List[str], Dict[int, str]]:
 
         norm = _normalize_pt(tok)
         if norm in _OMIT_PT_TOKENS:
+            continue
+        if norm in _CONNECTOR_PT_TOKENS:
+            # Em frases normais, o conector "e" nao deve vazar para "ni".
+            # Se for entrada isolada (ex.: "e"), mantemos para traducao direta.
+            if not has_content_words:
+                out_tokens.append(tok)
+                word_pos += 1
+                kept_word_index += 1
             continue
 
         suffix = _POSSESSIVE_SUFFIX_BY_PRONOUN.get(norm)
