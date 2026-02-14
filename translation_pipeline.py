@@ -1082,26 +1082,32 @@ def translate_pt_to_em(text: str) -> str:
     resources = load_resources()
     lexicon_pt, pronoun_pt, spell_vocab_pt, lexicon_em, pronoun_em, grammar_profile = _build_indexes(resources)
 
-    special_list = _translate_possessive_list_with_ni(
-        text,
-        lexicon_pt,
-        pronoun_pt,
-        spell_vocab_pt,
-        lexicon_em,
-        pronoun_em,
-        grammar_profile,
-    )
+    try:
+        special_list = _translate_possessive_list_with_ni(
+            text,
+            lexicon_pt,
+            pronoun_pt,
+            spell_vocab_pt,
+            lexicon_em,
+            pronoun_em,
+            grammar_profile,
+        )
+    except Exception:
+        special_list = None
     if special_list is not None:
         return special_list
-    special_comma_list = _translate_possessive_comma_list(
-        text,
-        lexicon_pt,
-        pronoun_pt,
-        spell_vocab_pt,
-        lexicon_em,
-        pronoun_em,
-        grammar_profile,
-    )
+    try:
+        special_comma_list = _translate_possessive_comma_list(
+            text,
+            lexicon_pt,
+            pronoun_pt,
+            spell_vocab_pt,
+            lexicon_em,
+            pronoun_em,
+            grammar_profile,
+        )
+    except Exception:
+        special_comma_list = None
     if special_comma_list is not None:
         return special_comma_list
 
@@ -1160,26 +1166,32 @@ def translate(text: str, direction: str = "auto") -> str:
     tokens = _tokenize(text)
 
     if direction == "pt_to_em":
-        special_list = _translate_possessive_list_with_ni(
-            text,
-            lexicon_pt,
-            pronoun_pt,
-            spell_vocab_pt,
-            lexicon_em,
-            pronoun_em,
-            grammar_profile,
-        )
+        try:
+            special_list = _translate_possessive_list_with_ni(
+                text,
+                lexicon_pt,
+                pronoun_pt,
+                spell_vocab_pt,
+                lexicon_em,
+                pronoun_em,
+                grammar_profile,
+            )
+        except Exception:
+            special_list = None
         if special_list is not None:
             return special_list
-        special_comma_list = _translate_possessive_comma_list(
-            text,
-            lexicon_pt,
-            pronoun_pt,
-            spell_vocab_pt,
-            lexicon_em,
-            pronoun_em,
-            grammar_profile,
-        )
+        try:
+            special_comma_list = _translate_possessive_comma_list(
+                text,
+                lexicon_pt,
+                pronoun_pt,
+                spell_vocab_pt,
+                lexicon_em,
+                pronoun_em,
+                grammar_profile,
+            )
+        except Exception:
+            special_comma_list = None
         if special_comma_list is not None:
             return special_comma_list
         return _translate_pt_to_em_with_indexes(
@@ -1209,26 +1221,32 @@ def translate(text: str, direction: str = "auto") -> str:
     phrase_preferences: Dict[int, str] = {}
     possessive_suffix_by_position: Dict[int, str] = {}
     if auto_dir == "pt_to_em":
-        special_list = _translate_possessive_list_with_ni(
-            text,
-            lexicon_pt,
-            pronoun_pt,
-            spell_vocab_pt,
-            lexicon_em,
-            pronoun_em,
-            grammar_profile,
-        )
+        try:
+            special_list = _translate_possessive_list_with_ni(
+                text,
+                lexicon_pt,
+                pronoun_pt,
+                spell_vocab_pt,
+                lexicon_em,
+                pronoun_em,
+                grammar_profile,
+            )
+        except Exception:
+            special_list = None
         if special_list is not None:
             return special_list
-        special_comma_list = _translate_possessive_comma_list(
-            text,
-            lexicon_pt,
-            pronoun_pt,
-            spell_vocab_pt,
-            lexicon_em,
-            pronoun_em,
-            grammar_profile,
-        )
+        try:
+            special_comma_list = _translate_possessive_comma_list(
+                text,
+                lexicon_pt,
+                pronoun_pt,
+                spell_vocab_pt,
+                lexicon_em,
+                pronoun_em,
+                grammar_profile,
+            )
+        except Exception:
+            special_comma_list = None
         if special_comma_list is not None:
             return special_comma_list
         return _translate_pt_to_em_with_indexes(
