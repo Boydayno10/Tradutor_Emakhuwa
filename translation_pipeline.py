@@ -22,6 +22,10 @@ def _is_punctuation(tok: str) -> bool:
 
 _OMIT_PT_TOKENS = {"o", "a", "os", "as", "da"}
 _CONNECTOR_PT_TOKENS = {"e"}
+_DEMONSTRATIVE_SUFFIX_BY_TOKEN = {
+    "esse": "owo",
+    "essa": "ola",
+}
 _POSSESSIVE_SUFFIX_BY_PRONOUN = {
     # Regra 2 (adotado: sufixo "ka" para meu/minha)
     "meu": "ka",
@@ -119,6 +123,59 @@ _PT_EXCLAMATION_HINTS = {
 }
 _POSSESSIVE_LIST_TRIGGER_PRONOUNS = {"meu", "minha", "meus", "minhas"}
 _COPULA_PT_TOKENS = {"e"}
+_PT_LIVING_HINTS = {
+    "homem",
+    "mulher",
+    "pessoa",
+    "pessoas",
+    "crianca",
+    "menino",
+    "menina",
+    "adulto",
+    "idoso",
+    "animal",
+    "animais",
+    "cao",
+    "cachorro",
+    "cadela",
+    "gato",
+    "gata",
+    "passaro",
+    "vaca",
+    "boi",
+    "cabra",
+    "galinha",
+    "planta",
+    "plantas",
+    "arvore",
+    "arvores",
+    "flor",
+    "flores",
+}
+_PT_PERSON_ANIMAL_HINTS = {
+    "homem",
+    "mulher",
+    "pessoa",
+    "pessoas",
+    "crianca",
+    "menino",
+    "menina",
+    "adulto",
+    "idoso",
+    "animal",
+    "animais",
+    "cao",
+    "cachorro",
+    "cadela",
+    "gato",
+    "gata",
+    "passaro",
+    "vaca",
+    "boi",
+    "cabra",
+    "galinha",
+    "peixe",
+}
 
 
 def _dedupe_keep_order(items: List[str]) -> List[str]:
@@ -620,16 +677,22 @@ def _prepare_pt_tokens(tokens: List[str]) -> Tuple[List[str], Dict[int, str]]:
     out_tokens: List[str] = []
     suffix_by_word_pos: Dict[int, str] = {}
     pending_suffix: Optional[str] = None
+    pending_demo_suffix: Optional[str] = None
     word_pos = 0
+    first_word_norm: Optional[str] = None
 
     filtered_word_norms: List[str] = []
     for tok in tokens:
         if _is_punctuation(tok):
             continue
         norm = _normalize_pt(tok)
+        if first_word_norm is None:
+            first_word_norm = norm
         if norm in _OMIT_PT_TOKENS:
             continue
         if norm in _POSSESSIVE_SUFFIX_BY_PRONOUN:
+            continue
+        if first_word_norm == norm and norm in _DEMONSTRATIVE_SUFFIX_BY_TOKEN:
             continue
         filtered_word_norms.append(norm)
     has_content_words = bool(filtered_word_norms)
@@ -642,6 +705,19 @@ def _prepare_pt_tokens(tokens: List[str]) -> Tuple[List[str], Dict[int, str]]:
 
         norm = _normalize_pt(tok)
         if norm in _OMIT_PT_TOKENS:
+            continue
+
+        if first_word_norm is None:
+            first_word_norm = norm
+
+        demo_suffix = _DEMONSTRATIVE_SUFFIX_BY_TOKEN.get(norm)
+        if (
+            demo_suffix is not None
+            and first_word_norm == norm
+            and word_pos == 0
+            and pending_demo_suffix is None
+        ):
+            pending_demo_suffix = demo_suffix
             continue
 
         suffix = _POSSESSIVE_SUFFIX_BY_PRONOUN.get(norm)
@@ -670,6 +746,20 @@ def _prepare_pt_tokens(tokens: List[str]) -> Tuple[List[str], Dict[int, str]]:
         out_tokens.append(tok)
         word_pos += 1
         kept_word_index += 1
+
+        if pending_demo_suffix:
+            # Regra nova: "esse/essa" no inicio da frase aplica sufixo apenas
+            # para pessoas/animais (nao objetos).
+            if norm in _PT_ADJECTIVE_HINTS:
+                continue
+            if norm in _PT_PERSON_ANIMAL_HINTS:
+                existing = suffix_by_word_pos.get(word_pos, "")
+                if pending_demo_suffix not in existing:
+                    suffix_by_word_pos[word_pos] = f"{existing}{pending_demo_suffix}"
+                pending_demo_suffix = None
+            else:
+                # Proximo termo nao e pessoa/animal: nao aplica.
+                pending_demo_suffix = None
 
         if pending_suffix:
             # Se vier adjetivo apos possessivo (ex.: "meu lindo carro"),
@@ -774,6 +864,12 @@ def _is_quality_clause_pt(text: str) -> bool:
     if normalized[-1] in _PT_ADJECTIVE_HINTS:
         return True
     return False
+
+
+def _copula_translation_for_context(prev_norm: str) -> str:
+    if prev_norm in _PT_LIVING_HINTS:
+        return "to"
+    return "tiyo"
 
 
 def _extract_quality_pair_parts_pt(text: str) -> Optional[Tuple[str, str]]:
@@ -982,7 +1078,10 @@ def _translate_quality_pair_with_ni(
     right_clean = re.sub(r"\s+([.,!?;:])", r"\1", right_t).strip(" \t\r\n.,!?;:").lower()
     if not left_clean or not right_clean:
         return None
-    return f"{left_clean} ni {right_clean}"
+    combined = f"{left_clean} ni {right_clean}".strip()
+    if not combined:
+        return None
+    return combined[:1].upper() + combined[1:]
 
 
 def _build_sentence_from_memory_words(tokens: List[str], selected_words: List[str]) -> str:
@@ -1066,6 +1165,12 @@ def _build_sentence_from_lookup(
         if direction == "pt_to_em" and _normalize_pt(tok) == "e" and len(tokens) > 1:
             # Em padrao de elogio/atribuicao ("X e bonito"), nao gerar "ni".
             # Em mencao/lista ("carro e galinha"), mantemos o conector.
+            prev_norm = ""
+            for j in range(idx - 1, -1, -1):
+                if _is_punctuation(tokens[j]):
+                    continue
+                prev_norm = _normalize_pt(tokens[j])
+                break
             next_norm = ""
             for j in range(idx + 1, len(tokens)):
                 if _is_punctuation(tokens[j]):
@@ -1073,7 +1178,7 @@ def _build_sentence_from_lookup(
                 next_norm = _normalize_pt(tokens[j])
                 break
             if next_norm in _PT_ADJECTIVE_HINTS:
-                out_tokens.append("tiyo")
+                out_tokens.append(_copula_translation_for_context(prev_norm))
                 continue
 
         word_position += 1

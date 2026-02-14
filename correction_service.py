@@ -11,6 +11,7 @@ from translation_pipeline import (
     _tokenize,
     load_resources,
     lookup_pt_to_em,
+    translate,
 )
 
 LEXICON_RESOURCE_TABLE = "emakua_ml_resources"
@@ -370,6 +371,18 @@ def _collect_variants_for_word(word: str) -> Tuple[Dict[str, str], List[Dict[str
     return principal, deduped
 
 
+def _word_exists_exact(word: str) -> bool:
+    resources = load_resources()
+    lexicon_pt, pronoun_pt, _, _, _, _ = _build_indexes(resources)
+    norm = _normalize_pt(word or "")
+    if not norm:
+        return False
+    if norm in lexicon_pt or norm in pronoun_pt:
+        return True
+    rows = _fetch_rows_by_norm_pt(norm)
+    return bool(rows)
+
+
 def _join_phrase_tokens(parts: List[str]) -> str:
     raw = " ".join(parts)
     raw = raw.replace(" ,", ",").replace(" .", ".").replace(" !", "!")
@@ -455,9 +468,12 @@ def get_phrase_correction_payload(texto: str) -> Dict[str, Any]:
             }
         )
 
-    frase_montada = _join_phrase_tokens(composed_parts)
-    if frase_montada:
-        frase_montada = frase_montada[0].upper() + frase_montada[1:]
+    try:
+        frase_montada = translate(phrase, direction="pt_to_em")
+    except Exception:
+        frase_montada = _join_phrase_tokens(composed_parts)
+        if frase_montada:
+            frase_montada = frase_montada[0].upper() + frase_montada[1:]
 
     return {
         "entrada": phrase,
@@ -603,10 +619,12 @@ def save_phrase_learning(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 def get_correction_payload(word: str) -> Dict[str, Any]:
     principal, variants = _collect_variants_for_word(word)
+    allow_add_word = not _word_exists_exact(word)
     return {
         "input": word,
         "principal": principal,
         "variantes": variants,
+        "allow_add_word": allow_add_word,
     }
 
 
